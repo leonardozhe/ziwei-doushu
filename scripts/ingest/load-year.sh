@@ -3,7 +3,7 @@
 #
 #   ./load-year.sh <year> <file.jsonl.zst> [pg_conninfo]
 #
-# 流程: 解压(流式, 不落盘) -> JSONL -> TSV -> psql COPY 直灌
+# 流程: zstd 流式解压 -> JSONL -> TSV -> psql COPY 直灌（无索引维护，最快）
 set -euo pipefail
 
 YEAR="$1"
@@ -21,7 +21,6 @@ echo "[$(date +%T)] year=$YEAR src=$(basename "$ZST")"
 zstd -dc --long=27 "$ZST" | node "$(dirname "$0")/jsonl-to-tsv.mjs" "$TMPD/charts.tsv" "$TMPD/readings.tsv"
 
 # 2) 灌命盘主表
-# charts.tsv -> 临时表 -> upsert
 psql "$CONN" -v ON_ERROR_STOP=1 <<SQL
 CREATE TEMP TABLE stg_charts (chart_key text, birth_year int, birth_month int, birth_day int, birth_hour int, gender text, mingzhu text);
 \copy stg_charts FROM '$TMPD/charts.tsv'
@@ -33,7 +32,7 @@ ON CONFLICT (chart_key) DO UPDATE SET
   gender = EXCLUDED.gender, mingzhu = EXCLUDED.mingzhu;
 SQL
 
-# 3) 灌解读表
+# 3) 灌解读表（trgm 索引在批量阶段先摘掉，最后统一重建）
 psql "$CONN" -v ON_ERROR_STOP=1 <<SQL
 CREATE TEMP TABLE stg_readings (chart_key text, topic text, char_count int, content text);
 \copy stg_readings FROM '$TMPD/readings.tsv'
@@ -51,4 +50,5 @@ psql "$CONN" -v ON_ERROR_STOP=1 -c "
 INSERT INTO ziwei_ingest_log (year, charts, readings, source_sha256, source_bytes)
 VALUES ($YEAR, $CH, $RD, '$SHA', $(stat -c%s "$ZST"));" >/dev/null
 
+rm -f "$TMPD/charts.tsv" "$TMPD/readings.tsv"
 echo "[$(date +%T)] year=$YEAR done charts=$CH readings=$RD"
