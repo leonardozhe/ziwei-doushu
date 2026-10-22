@@ -7,3 +7,8 @@ dist/
 *.tsbuildinfo
 .DS_Store
 node_modules
+
+# 数据管线产物（数据集本身不入库，走 Release 下载）
+data/
+_data_cache/
+*.tsv
