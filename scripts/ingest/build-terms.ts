@@ -29,9 +29,11 @@ async function main() {
 
   await client.query('TRUNCATE ziwei_terms CASCADE');
 
-  const terms = TERMS.map((t) => `(${t.term}, ${quote(t.type)})`).join(',');
+  // 参数化插入（术语是内部常量，但不做字符串拼接是硬规矩）
   await client.query(
-    `INSERT INTO ziwei_terms (term, term_type) VALUES ${terms}`,
+    `INSERT INTO ziwei_terms (term, term_type)
+     SELECT * FROM unnest($1::text[], $2::text[])`,
+    [TERMS.map((t) => t.term), TERMS.map((t) => t.type)],
   );
 
   // ── 2. 合并正则（长词优先，避免「命宫」抢在「父母宫」前面）────
@@ -107,10 +109,6 @@ async function main() {
 
 function escapeRegex(s: string): string {
   return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-}
-
-function quote(s: string): string {
-  return `'${s.replace(/'/g, "''")}'`;
 }
 
 main().catch((e) => {
