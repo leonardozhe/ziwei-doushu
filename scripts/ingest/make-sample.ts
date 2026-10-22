@@ -56,6 +56,8 @@ async function main() {
       mingzhu    text   NOT NULL DEFAULT '',
       PRIMARY KEY (term_id, chart_key)
     );
+    CREATE INDEX IF NOT EXISTS ziwei_term_charts_rank_idx
+      ON ziwei_term_charts (term_id, hits DESC, birth_year DESC);
   `);
 
   await client.query('TRUNCATE ziwei_readings, ziwei_charts, ziwei_sections CASCADE');
