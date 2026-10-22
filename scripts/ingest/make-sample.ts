@@ -27,8 +27,38 @@ async function main() {
   const client = new Client({ connectionString: CONN });
   await client.connect();
 
-  await client.query('TRUNCATE ziwei_readings, ziwei_charts, ziwei_sections CASCADE');
   await client.query('CREATE EXTENSION IF NOT EXISTS pg_trgm');
+
+  // 幂等建表：CI 上会先跑 schema.sql，但为了能独立运行，这里自己保证结构存在
+  await client.query(`
+    CREATE TABLE IF NOT EXISTS ziwei_sections (
+      id         bigserial PRIMARY KEY,
+      chart_key  text NOT NULL,
+      topic      text NOT NULL,
+      seq        int  NOT NULL,
+      heading    text NOT NULL,
+      content    text NOT NULL,
+      UNIQUE (chart_key, topic, seq)
+    );
+    CREATE TABLE IF NOT EXISTS ziwei_terms (
+      id          bigserial PRIMARY KEY,
+      term        text NOT NULL UNIQUE,
+      term_type   text NOT NULL DEFAULT 'other',
+      chart_count int  NOT NULL DEFAULT 0,
+      content_len int  NOT NULL DEFAULT 0
+    );
+    CREATE TABLE IF NOT EXISTS ziwei_term_charts (
+      term_id    bigint NOT NULL,
+      chart_key  text   NOT NULL,
+      hits       int    NOT NULL,
+      birth_year int    NOT NULL DEFAULT 0,
+      gender     text   NOT NULL DEFAULT '',
+      mingzhu    text   NOT NULL DEFAULT '',
+      PRIMARY KEY (term_id, chart_key)
+    );
+  `);
+
+  await client.query('TRUNCATE ziwei_readings, ziwei_charts, ziwei_sections CASCADE');
 
   let chartCount = 0;
   let readingCount = 0;
