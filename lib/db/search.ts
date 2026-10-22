@@ -5,13 +5,15 @@ import type { Topic } from './readings';
  * 解读正文检索。
  *
  * 设计要点（基于 v4.0 全量数据的实测）：
- *   数据集里「天府」这种高频主星名出现在 **345 万 / 877 万**段解读中（39%）。
- *   对全文做相似度排序（`content % keyword`）会退化成全表扫描 —— 实测单次 6 分钟。
+ *   数据集里「天府」这类高频主星名出现在 **345 万 / 877 万**段解读中（39%）。
+ *   对全文做相似度排序（`content % keyword`）或无过滤的 ILIKE 都会退化成全表扫描
+ *   —— 实测单次 6 分钟。
  *
  *   所以这里改成**按盘聚合的子串命中**：
  *     - 命中段数作为排序键（一个盘里出现 3 次比另一个盘出现 1 次更相关）
  *     - 支持按年份 / 性别 / 维度 / 命宫主星过滤，先把候选集缩小
- *     - 结果按「命盘命中数」排序，语义是「哪些盘在讲这件事」
+ *     - 执行顺序：先用 ziwei_charts 的索引筛候选盘，再在候选盘内做 ILIKE
+ *       （实测 1990 年单年查询 1.8 秒）
  */
 
 /** 命宫主星的取值集合（用于过滤） */
@@ -43,34 +45,34 @@ export interface SearchHit {
 }
 
 /**
- * 把**作用于命盘表**的过滤条件拼成 SQL where 片段，同时往 params 里追加参数。
- * topic 作用于解读表，由调用方单独处理。
+ * 构造「命盘表」侧的过滤条件。
+ * 返回 where 片段数组，参数按出现顺序压入 params（占位符编号从 params.length 起算）。
  */
-function buildChartFilters(filters: SearchFilters, params: unknown[]): string[] {
-  const where: string[] = [];
+function chartFilterClauses(f: SearchFilters, params: unknown[]): string[] {
+  const clauses: string[] = [];
 
-  if (filters.year !== undefined) {
-    params.push(filters.year);
-    where.push(`c.birth_year = $${params.length}`);
+  if (f.year !== undefined) {
+    params.push(f.year);
+    clauses.push(`c.birth_year = $${params.length}`);
   }
-  if (filters.yearFrom !== undefined) {
-    params.push(filters.yearFrom);
-    where.push(`c.birth_year >= $${params.length}`);
+  if (f.yearFrom !== undefined) {
+    params.push(f.yearFrom);
+    clauses.push(`c.birth_year >= $${params.length}`);
   }
-  if (filters.yearTo !== undefined) {
-    params.push(filters.yearTo);
-    where.push(`c.birth_year <= $${params.length}`);
+  if (f.yearTo !== undefined) {
+    params.push(f.yearTo);
+    clauses.push(`c.birth_year <= $${params.length}`);
   }
-  if (filters.gender) {
-    params.push(filters.gender);
-    where.push(`c.gender = $${params.length}`);
+  if (f.gender) {
+    params.push(f.gender);
+    clauses.push(`c.gender = $${params.length}`);
   }
-  if (filters.mingzhu) {
-    params.push(filters.mingzhu);
-    where.push(`c.mingzhu = $${params.length}`);
+  if (f.mingzhu) {
+    params.push(f.mingzhu);
+    clauses.push(`c.mingzhu = $${params.length}`);
   }
 
-  return where;
+  return clauses;
 }
 
 export async function searchReadings(
@@ -80,10 +82,12 @@ export async function searchReadings(
   const limit = Math.min(opts.limit ?? 20, 100);
   const offset = Math.max(opts.offset ?? 0, 0);
 
+  // 参数顺序：$1 永远是关键词，其后是过滤条件，最后是 limit/offset
   const params: unknown[] = [keyword];
-  const candWhere = buildChartFilters(opts, params);
 
-  // topic 作用于解读表，单独成句
+  const chartClauses = chartFilterClauses(opts, params);
+
+  // topic 作用于解读表，不是命盘表，单独成句
   let topicClause = '';
   if (opts.topic) {
     params.push(opts.topic);
@@ -94,23 +98,20 @@ export async function searchReadings(
   const limitIdx = params.length - 1;
   const offsetIdx = params.length;
 
-  // 执行顺序：**先按盘过滤（走 ziwei_charts 的索引），再在候选盘内做 ILIKE**。
-  // 直接对 877 万段全文做 ILIKE 会退化成全表扫描（实测 6 分钟）；
-  // 先用 birth_year / gender / mingzhu 把候选盘缩小后，实测 1.8 秒。
+  // 先按盘过滤（走 ziwei_charts 索引）缩小候选集，再在候选盘内做 ILIKE
   return query<SearchHit>(
     `WITH cand AS (
-       SELECT c.chart_key, c.birth_year, c.birth_month, c.birth_day,
-              c.birth_hour, c.gender, c.mingzhu
+       SELECT c.chart_key, c.birth_year
          FROM ziwei_charts c
-        WHERE ${candWhere.length ? candWhere.join(' AND ') : 'true'}
+        WHERE ${chartClauses.length ? chartClauses.join(' AND ') : 'TRUE'}
      ),
      hit AS (
        SELECT r.chart_key,
-              count(*)                   AS hits,
+              count(*)                    AS hits,
               array_agg(DISTINCT r.topic) AS matching_topics,
-              min(r.id)                  AS first_id
-         FROM ziwei_readings r
-         JOIN cand c USING (chart_key)
+              min(r.id)                   AS first_id
+         FROM cand
+         JOIN ziwei_readings r USING (chart_key)
         WHERE r.content ILIKE $1
           ${topicClause}
         GROUP BY r.chart_key, c.birth_year
@@ -138,7 +139,7 @@ export async function countMatchingCharts(
   filters: SearchFilters = {},
 ): Promise<number> {
   const params: unknown[] = [keyword];
-  const candWhere = buildChartFilters(filters, params);
+  const chartClauses = chartFilterClauses(filters, params);
 
   let topicClause = '';
   if (filters.topic) {
@@ -148,11 +149,11 @@ export async function countMatchingCharts(
 
   const rows = await query<{ n: string }>(
     `SELECT count(DISTINCT r.chart_key) AS n
-       FROM ziwei_readings r
-       JOIN ziwei_charts c USING (chart_key)
+       FROM ziwei_charts c
+       JOIN ziwei_readings r USING (chart_key)
       WHERE r.content ILIKE $1
         ${topicClause}
-        ${candWhere.length ? 'AND ' + candWhere.join(' AND ') : ''}`,
+        ${chartClauses.length ? 'AND ' + chartClauses.join(' AND ') : ''}`,
     params,
   );
   return Number(rows[0]?.n ?? 0);
