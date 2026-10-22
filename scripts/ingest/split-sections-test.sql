@@ -14,8 +14,8 @@ JOIN ziwei_charts c USING (chart_key)
 CROSS JOIN LATERAL (
   SELECT
     (row_number() OVER (ORDER BY part.ord))::int AS ord,
-    coalesce((regexp_match(part.txt, '^\s*\*\*【([^】]+)】\*\*'))[1], '') AS heading,
-    regexp_replace(part.txt, '^\s*\*\*【[^】]+】\*\*\s*', '', 'g') AS body
+    coalesce((regexp_match(part.txt, '^\s*[*][*]【([^】]+)】[*][*]'))[1], '') AS heading,
+    regexp_replace(part.txt, '^\s*[*][*]【[^】]+】[*][*]\s*', '', 'g') AS body
   FROM (
     SELECT txt, ord FROM regexp_split_to_table(r.content, '\*\*【[^】]+】\*\*')
       WITH ORDINALITY AS p(txt, ord)
@@ -27,6 +27,6 @@ SELECT count(*) AS rows, count(DISTINCT heading) AS headings,
        avg(length(content))::int AS avg_len, max(length(content)) AS max_len
 FROM stg;
 
-SELECT heading, count(*) FROM stg GROUP BY 1 ORDER BY 2 DESC LIMIT 8;
+SELECT heading, count(*) FROM stg GROUP BY 1 ORDER BY 2 DESC LIMIT 10;
 
-SELECT heading, left(content, 200) FROM stg WHERE heading = '一句话定调' LIMIT 1;
+SELECT heading, left(content, 160) FROM stg WHERE heading = '一句话定调' LIMIT 1;
