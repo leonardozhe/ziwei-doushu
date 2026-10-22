@@ -113,7 +113,7 @@ export async function searchReadings(
          JOIN cand c USING (chart_key)
         WHERE r.content ILIKE $1
           ${topicClause}
-        GROUP BY r.chart_key
+        GROUP BY r.chart_key, c.birth_year
         ORDER BY hits DESC, c.birth_year DESC
         LIMIT $${limitIdx} OFFSET $${offsetIdx}
      )
