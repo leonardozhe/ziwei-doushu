@@ -45,6 +45,14 @@ export interface SearchHit {
 }
 
 /**
+ * 转义 ILIKE 模式里的特殊字符（% _ \），避免用户输入被当成通配符。
+ * 转义符用默认的 \（standard_conforming_strings=on）。
+ */
+function escapeLike(s: string): string {
+  return s.replace(/([\\%_])/g, '\\$1');
+}
+
+/**
  * 构造「命盘表」侧的过滤条件。
  * 返回 where 片段数组，参数按出现顺序压入 params（占位符编号从 params.length 起算）。
  */
@@ -82,8 +90,9 @@ export async function searchReadings(
   const limit = Math.min(opts.limit ?? 20, 100);
   const offset = Math.max(opts.offset ?? 0, 0);
 
-  // 参数顺序：$1 永远是关键词，其后是过滤条件，最后是 limit/offset
-  const params: unknown[] = [keyword];
+  // 参数顺序：$1 永远是关键词（含通配符），其后是过滤条件，最后是 limit/offset
+  // ILIKE 不带 % 就是精确匹配 —— 子串检索必须自己加通配符
+  const params: unknown[] = [`%${escapeLike(keyword)}%`];
 
   const chartClauses = chartFilterClauses(opts, params);
 
@@ -139,7 +148,7 @@ export async function countMatchingCharts(
   keyword: string,
   filters: SearchFilters = {},
 ): Promise<number> {
-  const params: unknown[] = [keyword];
+  const params: unknown[] = [`%${escapeLike(keyword)}%`];
   const chartClauses = chartFilterClauses(filters, params);
 
   let topicClause = '';
