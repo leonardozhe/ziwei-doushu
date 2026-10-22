@@ -37,20 +37,20 @@ function ChartPageInner() {
   const searchParams = useSearchParams();
 
   // ── URL 直达：/chart?y=1990&m=1&d=1&h=4&g=male 直接起盘 ──
+  // 依赖 searchParams.toString()（字符串）而不是 searchParams 对象本身 ——
+  // 每次渲染 searchParams 都是新对象，直接依赖它会让 effect 反复触发。
+  const searchKey = searchParams.toString();
+
   useEffect(() => {
-    const birth = parseBirthFromSearch(searchParams);
-    console.log('[chart] url params', searchParams.toString(), '->', JSON.stringify(birth));
+    const birth = parseBirthFromSearch(searchKey);
     if (!birth) return;
     try {
-      const c = generateChart(birth);
-      console.log('[chart] generated', c.mingZhu);
-      setChart(c);
-    } catch (err) {
+      setChart(generateChart(birth));
+    } catch {
       // 日期不存在等非法参数：留在表单页让用户改
-      console.error('[chart] generateChart failed', err);
       setChart(null);
     }
-  }, [searchParams]);
+  }, [searchKey]);
 
   // ── 未起盘：展示出生信息表单 ──
   if (!chart) {
