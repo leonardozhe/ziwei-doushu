@@ -32,19 +32,33 @@
 |---|---|
 | 命盘页接入解读数据集面板（起盘→解读闭环） | ✅ |
 | URL 直达起盘 `/chart?y=&m=&d=&h=&g=` | ✅ |
-| zh/en 双语字典层 + Provider + 切换器 | ✅ 295 key |
+| zh/en 双语字典层 + Provider + 切换器 | ✅ 356 key |
 | 首页文案国际化（78 处） | ✅ |
 | 公告弹窗国际化（全屏首屏内容） | ✅ |
-| 命盘页 / 12 宫位 / 14 主星国际化 | 🚧 进行中 |
+| 命盘页 + 12 宫位 + 14 主星 + 盘面术语国际化 | ✅ |
+| 星曜详解 / 知识库 / 分享卡 / 合盘页国际化 | ⬜ 未做 |
 
 ### 4. 质量
 
 | 项 | 状态 |
 |---|---|
 | `npm run typecheck` | ✅ 通过 |
-| `npm test`（上游 9 组 + 新增 birth-url 10 项断言） | ✅ 通过 |
-| GitHub Actions CI | ✅ 绿灯（58s） |
+| `npm test`（上游 9 组 + birth-url + 口径一致性 + 术语倒排） | ✅ 通过 |
+| GitHub Actions CI（`ci.yml`） | ✅ 绿灯（59s） |
+| GitHub Actions 数据库 CI（`ci-db.yml`，真实 Postgres） | ✅ 绿灯（110s） |
 | 生产构建 `next build` | ✅ 通过（4 条 API 路由注册） |
+| 生产服务（systemd） | ✅ 运行中，内存 54MB |
+| 健康检查脚本 | ✅ 9 项全过 |
+
+### 生产实测性能
+
+| 端点 | 耗时 |
+|---|---|
+| `GET /api/search?q=天府` | 10–20ms |
+| `GET /api/health` | <5ms |
+| `GET /` | 12ms |
+| `GET /chart?y=1990&m=1&d=1&h=4&g=male` | 9ms |
+| `GET /api/reading?...` | 11ms |
 
 ---
 
