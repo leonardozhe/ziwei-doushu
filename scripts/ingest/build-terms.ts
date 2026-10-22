@@ -11,7 +11,7 @@
  *
  * 做法：
  *   1. 术语表来自 lib/ziwei/terms.ts（与引擎常量一致）
- *   2. 一次扫描「总览类」小节，用一个合并正则抽出每行命中的所有术语
+ *   2. 一次扫描「高价值小节」，用一个合并正则抽出每行命中的所有术语
  *   3. 聚合到「命盘 × 术语」
  */
 import { Client } from 'pg';
@@ -41,7 +41,7 @@ async function main() {
   const pattern = sorted.map((t) => escapeRegex(t.term)).join('|');
 
   const client2 = client;
-  console.log('[build-terms] 开始扫描总览类小节…');
+  console.log('[build-terms] 开始扫描高价值小节…');
   const t0 = Date.now();
 
   // 一次扫描。regexp_matches 抽出所有命中词，再用数组包含过滤（只保留在术语表里的）
@@ -51,7 +51,12 @@ async function main() {
     `WITH scan AS (
        SELECT s.chart_key, s.content
          FROM ziwei_sections s
-        WHERE s.heading LIKE '%总览'
+        WHERE s.heading IN (
+          '命格总览', '性格总览', '感情总览', '事业总览', '财运总览', '健康总览',
+          '兄弟总览', '子女总览', '迁移总览', '人际总览', '田宅总览', '福德总览',
+          '父母总览', '身宫 · 后天追求', '一句话定调', '命盘推演',
+          '年干四化·关键宫位影响', '核心论断', '针对你的命盘', '⚠️ 风险提醒'
+        )
      ),
      hits AS (
        SELECT scan.chart_key,
