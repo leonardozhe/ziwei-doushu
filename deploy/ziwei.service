@@ -16,8 +16,11 @@ Type=simple
 User=ci
 WorkingDirectory=/home/ci/dev/ziwei-global/app
 Environment=NODE_ENV=production
+# node/npx 装在 /opt/node，systemd 默认 PATH 里没有
+Environment=PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/opt/node/bin
 EnvironmentFile=/home/ci/dev/ziwei-global/app/.env.local
-ExecStart=/usr/bin/npx next start -p 3020
+# 用项目本地的 next，避免 npx 去下载
+ExecStart=/home/ci/dev/ziwei-global/app/node_modules/.bin/next start -p 3020
 Restart=always
 RestartSec=5
 StandardOutput=append:/home/ci/dev/ziwei-global/logs/ziwei.service.log
