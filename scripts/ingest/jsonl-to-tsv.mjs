@@ -1,23 +1,19 @@
 #!/usr/bin/env node
 /**
- * 把 v4.0 解读数据集的 JSONL 转成两个 TSV，供 psql \copy 直灌。
+ * 把 v4.0 解读数据集的 JSONL（从 stdin 读）转成两个 TSV，供 psql \copy 直灌。
  *
- *   node jsonl-to-tsv.mjs <input.jsonl> <charts.tsv> <readings.tsv>
+ *   zstd -dc --long=27 year-YYYY.jsonl.zst | node jsonl-to-tsv.mjs <charts.tsv> <readings.tsv>
  *
  * 格式（制表符分隔，字段内换行/制表符已转义）：
  *   charts.tsv   : chart_key \t year \t month \t day \t hour \t gender \t mingzhu
  *   readings.tsv : chart_key \t topic \t char_count \t content
- *
- * content 为 Markdown 正文，制表符转成空格，换行转成 \n 字面量。
  */
-import { createReadStream, createWriteStream } from 'node:fs';
+import { createWriteStream } from 'node:fs';
 import { createInterface } from 'node:readline';
-import { pipeline } from 'node:stream/promises';
-import { createGunzip } from 'node:zlib';
 
-const [input, chartsOut, readingsOut] = process.argv.slice(2);
-if (!input || !chartsOut || !readingsOut) {
-  console.error('usage: jsonl-to-tsv.mjs <input.jsonl|.zst> <charts.tsv> <readings.tsv>');
+const [chartsOut, readingsOut] = process.argv.slice(2);
+if (!chartsOut || !readingsOut) {
+  console.error('usage: zstd -dc file.zst | node jsonl-to-tsv.mjs <charts.tsv> <readings.tsv>');
   process.exit(1);
 }
 
@@ -36,6 +32,7 @@ const esc = (s) => s
 let charts = 0;
 let readings = 0;
 let bytes = 0;
+let bad = 0;
 
 const chartsStream = createWriteStream(chartsOut);
 const readingsStream = createWriteStream(readingsOut);
@@ -44,17 +41,14 @@ const write = async (stream, chunk) => {
   if (!stream.write(chunk)) await new Promise((r) => stream.once('drain', r));
 };
 
-const source = input.endsWith('.zst')
-  ? pipeline(createReadStream(input), createGunzip())
-  : createReadStream(input);
-
-const rl = createInterface({ input: source, crlfDelay: Infinity });
+const rl = createInterface({ input: process.stdin, crlfDelay: Infinity });
 
 for await (const line of rl) {
   if (!line.trim()) continue;
   let rec;
   try { rec = JSON.parse(line); } catch (e) {
-    console.error(`skip bad json at line ${charts + 1}: ${e.message}`);
+    bad++;
+    if (bad <= 5) console.error(`skip bad json: ${e.message}`);
     continue;
   }
   const { k, y, m, d, h, g, ms, c } = rec;
@@ -79,4 +73,4 @@ await Promise.all([
   new Promise((r) => readingsStream.once('close', r)),
 ]);
 
-console.log(JSON.stringify({ charts, readings, contentBytes: bytes }));
+console.error(`[jsonl-to-tsv] charts=${charts} readings=${readings} bytes=${bytes} bad=${bad}`);

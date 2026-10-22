@@ -18,7 +18,7 @@ mkdir -p "$TMPD"
 echo "[$(date +%T)] year=$YEAR src=$(basename "$ZST")"
 
 # 1) 流式解压 + 转 TSV（解压产物不落 56GB 磁盘，只留中间 TSV）
-node "$(dirname "$0")/jsonl-to-tsv.mjs" "$ZST" "$TMPD/charts.tsv" "$TMPD/readings.tsv"
+zstd -dc --long=27 "$ZST" | node "$(dirname "$0")/jsonl-to-tsv.mjs" "$TMPD/charts.tsv" "$TMPD/readings.tsv"
 
 # 2) 灌命盘主表
 # charts.tsv -> 临时表 -> upsert
