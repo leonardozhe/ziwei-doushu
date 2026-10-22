@@ -8,6 +8,7 @@ import DatasetReading from '@/components/DatasetReading';
 import LocaleSwitcher from '@/components/LocaleSwitcher';
 import TimeNav, { type TimeView } from '@/components/TimeNav';
 import { generateChart } from '@/lib/ziwei/algorithm';
+import { useI18n } from '@/lib/i18n/provider';
 import type { BirthInfo, ZiweiChart, Palace } from '@/lib/ziwei/types';
 import { parseBirthFromSearch, birthToSearch } from '@/lib/ziwei/birth-url';
 
@@ -24,13 +25,23 @@ import { parseBirthFromSearch, birthToSearch } from '@/lib/ziwei/birth-url';
 export default function ChartPage() {
   // useSearchParams 需要 Suspense 边界（App Router 静态化要求）
   return (
-    <Suspense fallback={<main style={{ maxWidth: 720, margin: '0 auto', padding: '48px 20px' }}>加载中…</main>}>
+    <Suspense fallback={<ChartPageFallback />}>
       <ChartPageInner />
     </Suspense>
   );
 }
 
+function ChartPageFallback() {
+  const { t } = useI18n();
+  return (
+    <main style={{ maxWidth: 720, margin: '0 auto', padding: '48px 20px' }}>
+      {t('chart.loading')}
+    </main>
+  );
+}
+
 function ChartPageInner() {
+  const { t } = useI18n();
   const [chart, setChart] = useState<ZiweiChart | null>(null);
   const [selectedPalace, setSelectedPalace] = useState<Palace | null>(null);
   const [view, setView] = useState<TimeView>('mingpan');
@@ -57,11 +68,11 @@ function ChartPageInner() {
   if (!chart) {
     return (
       <main style={{ maxWidth: 720, margin: '0 auto', padding: '48px 20px' }}>
-        <h1 style={{ fontSize: 28, fontWeight: 700, marginBottom: 8 }}>紫微斗数排盘</h1>
+        <h1 style={{ fontSize: 28, fontWeight: 700, marginBottom: 8 }}>{t('chart.page.title')}</h1>
         <p style={{ color: '#888', marginBottom: 32, fontSize: 14, lineHeight: 1.7 }}>
-          输入出生年月日时，开源排盘引擎即时生成命盘。
+          {t('chart.page.desc')}
           <br />
-          （本页为引擎 Demo，完整商业版界面不在开源范围；排盘内核完全开放。）
+          {t('chart.page.desc2')}
         </p>
         <BirthForm
           onSubmit={(info: BirthInfo) => {
@@ -95,7 +106,7 @@ function ChartPageInner() {
           border: '1px solid #ccc', borderRadius: 8, background: 'transparent',
         }}
       >
-        ← 重新起盘
+        ← {t('chart.reset')}
       </button>
 
       <TimeNav
@@ -119,7 +130,10 @@ function ChartPageInner() {
 
       {/* 解读数据集 v4.0：这一张盘在数据集里的 13 维解读（确定性，无需 API Key） */}
       <section style={{ maxWidth: 1280, margin: '40px auto 0', padding: '0 16px' }}>
-        <h2 style={{ fontSize: 20, fontWeight: 700, marginBottom: 12 }}>命盘解读数据集</h2>
+        <h2 style={{ fontSize: 20, fontWeight: 700, marginBottom: 6 }}>{t('chart.dataset.title')}</h2>
+        <p style={{ color: '#888', fontSize: 12, marginBottom: 12, lineHeight: 1.6 }}>
+          {t('chart.dataset.desc')}
+        </p>
         <DatasetReading
           year={chart.birthInfo.year}
           month={chart.birthInfo.month}

@@ -13,9 +13,14 @@
  *  - 《紫微斗数全书》（罗洪先编，明代刊本）
  *  - 《骨髓赋》《女命骨髓赋》《十二宫诸星得地合格诀》
  *  - 倪师《天纪》紫微斗数讲义
+ *
+ * 2026-10-22：去掉 `import 'server-only'`。
+ *   本文件是纯计算（只用 chart 数据 + 字符串字面量，不碰任何 Node API），
+ *   但它被客户端组件 ChartSummary / PatternsCard 引用；server-only 会让
+ *   它们无法在浏览器里跑。留着的唯一理由是「别被人直接当 API 用」，
+ *   而这个约束由调用方（页面）负责，不该由数据层强制。
  */
 
-import 'server-only';
 import type { ZiweiChart, Palace, Star } from './types';
 
 // ────────────────── 类型 ──────────────────

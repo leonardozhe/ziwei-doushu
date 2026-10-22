@@ -2,6 +2,7 @@
 import { motion } from 'framer-motion';
 import type { Palace, Star } from '@/lib/ziwei/types';
 import { STEMS, BRANCHES } from '@/lib/ziwei/constants';
+import { useI18n } from '@/lib/i18n/provider';
 import clsx from 'clsx';
 
 interface PalaceCellProps {
@@ -37,6 +38,7 @@ const SiHuaBadge = ({
   label?: string;
   onClick?: (e: React.MouseEvent) => void;
 }) => {
+  const { siHuaName } = useI18n();
   return (
     <span
       className={clsx(
@@ -48,7 +50,7 @@ const SiHuaBadge = ({
       onClick={onClick}
     >
       {overlay && label && <span className="mr-px opacity-70">{label}</span>}
-      {siHua}
+      {siHuaName(siHua)}
     </span>
   );
 };
@@ -57,8 +59,9 @@ export default function PalaceCell({
   palace, onClick, onStarClick, isSelected, isSanFang, delay = 0,
   overlayStarSiHua, overlayLabel, onSiHuaClick,
 }: PalaceCellProps) {
+  const { t, palaceName, starName, branchName, stemName } = useI18n();
   const { branch, stem, name, stars, daXianAge, isCurrentDaXian, isMingGong, isShenGong } = palace;
-  const ganzhi = `${STEMS[stem]}${BRANCHES[branch]}`;
+  const ganzhi = `${stemName(STEMS[stem])}${branchName(BRANCHES[branch])}`;
 
   const majorStars = stars.filter(s => s.type === 'major');
   const luckyStars = stars.filter(s => s.type === 'lucky');
@@ -110,13 +113,23 @@ export default function PalaceCell({
         )}
           style={!isMingGong && !isShenGong ? { color: 'var(--t-faint)' } : undefined}
         >
-          {name}
+          {palaceName(name)}
         </span>
         {isMingGong && (
-          <span className="text-[7px] text-amber-500/80 border border-amber-500/30 px-0.5 rounded leading-tight">命</span>
+          <span
+            className="text-[7px] text-amber-500/80 border border-amber-500/30 px-0.5 rounded leading-tight"
+            title={t('palace.ming')}
+          >
+            {t('palace.mingBadge')}
+          </span>
         )}
         {isShenGong && (
-          <span className="text-[7px] text-sky-500/80 border border-sky-500/30 px-0.5 rounded leading-tight">身</span>
+          <span
+            className="text-[7px] text-sky-500/80 border border-sky-500/30 px-0.5 rounded leading-tight"
+            title={t('palace.shen')}
+          >
+            {t('palace.shenBadge')}
+          </span>
         )}
       </div>
 
@@ -126,7 +139,9 @@ export default function PalaceCell({
       {/* 主星 */}
       <div className="flex flex-col gap-0.5 flex-1">
         {majorStars.length === 0 && (
-          <span className="text-[10px] italic" style={{ color: 'var(--t-faint)', opacity: 0.6 }}>空宫</span>
+          <span className="text-[10px] italic" style={{ color: 'var(--t-faint)', opacity: 0.6 }}>
+            {t('palace.empty')}
+          </span>
         )}
         {majorStars.map((star) => {
           const overlaySiHua = overlayStarSiHua?.[star.name];
@@ -140,7 +155,7 @@ export default function PalaceCell({
                 'text-[13px] leading-tight font-bold tracking-tight cursor-pointer hover:brightness-125 transition-all',
                 star.brightness === 'bright' ? 'text-amber-300' : star.brightness === 'dim' ? 'text-amber-700/80' : 'text-amber-500',
               )}>
-                {star.name}
+                {starName(star.name)}
               </span>
               {star.siHua && <SiHuaBadge siHua={star.siHua} />}
               {overlaySiHua && (
@@ -166,7 +181,7 @@ export default function PalaceCell({
             const overlaySiHua = overlayStarSiHua?.[s.name];
             return (
               <span key={s.name} className="inline-flex items-center text-[9px] text-sky-500/70 leading-tight">
-                {s.name}
+                {starName(s.name)}
                 {s.siHua && <SiHuaBadge siHua={s.siHua} />}
                 {overlaySiHua && (
                   <SiHuaBadge
@@ -190,7 +205,7 @@ export default function PalaceCell({
         <div className="flex flex-wrap gap-x-1">
           {shaStars.map(s => (
             <span key={s.name} className="text-[9px] text-red-500/60 leading-tight">
-              {s.name}{s.siHua && <SiHuaBadge siHua={s.siHua} />}
+              {starName(s.name)}{s.siHua && <SiHuaBadge siHua={s.siHua} />}
             </span>
           ))}
         </div>
