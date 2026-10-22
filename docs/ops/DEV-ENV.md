@@ -97,6 +97,35 @@ bash scripts/ingest/load-year.sh 1990 "$ZIWEI_RAW_DIR/year-1990.jsonl.zst"
 **磁盘**：解压产物**不落盘**（`zstd -dc` 流式管道），中间 TSV 用完即删。
 56.6 GB 的原始数据只以 155 MB 压缩包形式存在于磁盘。
 
+### 3.3 小节索引（检索加速层）
+
+```bash
+psql "$ZIWEI_DATABASE_URL" -f scripts/ingest/split-sections.sql   # 拆小节，约 50 分钟
+psql "$ZIWEI_DATABASE_URL" -f scripts/ingest/index-sections.sql   # 建 trgm 索引，约 30 分钟
+```
+
+**为什么要这一层**（v4.0 全量实测）：
+
+| 方案 | 实测 | 原因 |
+|---|---|---|
+| `content ILIKE '%kw%'` | 跨年 > 2 分钟 | 前后都通配时 GIN trgm 索引无法提取 trigram，退化成全表扫描 |
+| `content % 'kw'` | 更慢 | 能走索引，但 2.3KB 中文长文本上 trgm 代价极高 |
+| **拆小节后检索** | **秒级** | 每行内容变短（平均 ~200 字），索引真正可用 |
+
+拆法：每段解读按 `**【小节标题】**` 前瞻分割。实测 877 万段 → **91,460,638 个小节**
+（约 10.4 个/段），小节标题是有限集合（**26 种**）。
+
+小节标题全集（可用于 `heading` 过滤）：
+
+```
+命格总览 性格总览 感情总览 事业总览 财运总览 健康总览 兄弟总览 子女总览
+迁移总览 人际总览 田宅总览 福德总览 父母总览
+一句话定调 核心论断 命盘依据 三方四正联动 命盘推演
+身宫 · 后天追求 针对你的命盘 ⚠️ 风险提醒
+四化路径分析 · 落到你这盘 四化路径 · 你这盘 年干四化·关键宫位影响
+倪师子午流注 · 宫位取象（流派参考） 经典出处
+```
+
 ---
 
 ## 4. 数据库结构
@@ -141,7 +170,7 @@ npx next dev -p 3020
 | `/api/health` | GET | 库连通性、命盘数、解读段数、年份覆盖 |
 | `/api/chart` | POST | 服务端排盘（与前端同一引擎口径） |
 | `/api/reading` | GET | 取一张盘的 13 维解读 |
-| `/api/search` | GET | 解读正文中文子串检索（pg_trgm） |
+| `/api/search` | GET | 解读小节中文子串检索（pg_trgm，走 `ziwei_sections`） |
 
 示例：
 
@@ -151,8 +180,13 @@ curl -s -X POST http://127.0.0.1:3020/api/chart -H 'Content-Type: application/js
 
 curl -s "http://127.0.0.1:3020/api/reading?year=1990&month=1&day=1&hour=0&gender=male"
 
-curl -s "http://127.0.0.1:3020/api/search?q=天府&limit=5"
+# 检索必须带至少一个过滤条件（全库扫描会超时）
+curl -s "http://127.0.0.1:3020/api/search?q=天府&year=1990&limit=5"
+curl -s "http://127.0.0.1:3020/api/search?q=天府&yearFrom=2000&yearTo=2005&topic=wealth&limit=5"
+curl -s "http://127.0.0.1:3020/api/search?q=太阳&mingzhu=天府&limit=5"
 ```
+
+过滤参数：`year` / `yearFrom` / `yearTo` / `gender` / `topic` / `heading` / `mingzhu`
 
 ---
 
