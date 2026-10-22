@@ -2,7 +2,8 @@
 --
 --   psql ... -f scripts/ingest/split-sections.sql
 --
--- 做法：正则按 **【标题】** 切分，标题本身作为 heading 存下来。
+-- 做法：用**前瞻分割**在每个 **【标题】** 之前切开（标题保留在片段开头），
+--   再从片段开头提取标题、剥掉标题标记作为正文。
 -- 切分实测：877 万段解读 → 91,460,638 个小节（约 10.4 个/段）。
 --
 -- 分批提交，避免单个事务撑爆 WAL。
@@ -23,8 +24,7 @@ CREATE INDEX IF NOT EXISTS ziwei_sections_topic_idx   ON ziwei_sections (topic);
 CREATE INDEX IF NOT EXISTS ziwei_sections_heading_idx ON ziwei_sections (heading);
 CREATE INDEX IF NOT EXISTS ziwei_sections_chart_idx  ON ziwei_sections (chart_key);
 
--- ── 分批：每年一批，逐年推进 ─────────────────────────────
--- \gexec 之前先用 DO 块循环所有年份
+-- ── 分批：每年一批 ───────────────────────────────────────
 DO $$
 DECLARE
   y int;
@@ -46,7 +46,7 @@ BEGIN
           regexp_replace(part.txt, '^\s*[*][*]【[^】]+】[*][*]\s*', '', 'g') AS body
         FROM (
           SELECT p.txt, p.ord
-            FROM regexp_split_to_table(r.content, '\*\*【[^】]+】\*\*')
+            FROM regexp_split_to_table(r.content, '(?=[*][*]【)')
                  WITH ORDINALITY AS p(txt, ord)
         ) AS part
       ) s
