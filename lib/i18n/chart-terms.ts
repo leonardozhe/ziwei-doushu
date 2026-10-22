@@ -123,12 +123,22 @@ export const ELEMENT_EN: Record<string, string> = {
   金: 'Metal', 木: 'Wood', 水: 'Water', 火: 'Fire', 土: 'Earth',
 };
 
-/** 五行局：'水二局' 这类整串 → 英文 */
+/** 局数的汉字写法 → 英文序数 */
+const JU_ORDINAL_EN: Record<string, string> = {
+  一: '1st', 二: '2nd', 三: '3rd', 四: '4th', 五: '5th', 六: '6th',
+};
+
+/**
+ * 五行局整串 → 英文。
+ *
+ * 源数据用的是汉字数字（'金四局'，见 lib/ziwei/constants.ts 的 JU_NAMES），
+ * 不是阿拉伯数字——正则要按汉字来匹配。
+ */
 export function wuxingJuEn(name: string): string {
-  const m = name.match(/^([金木水火土])(\d)局$/);
+  const m = name.match(/^([金木水火土])([一二三四五六])局$/);
   if (!m) return name;
   const el = ELEMENT_EN[m[1]] ?? m[1];
-  const ord = ['', '1st', '2nd', '3rd', '4th', '5th', '6th'][Number(m[2])] ?? m[2];
+  const ord = JU_ORDINAL_EN[m[2]] ?? m[2];
   return `${el} ${ord}`;
 }
 
