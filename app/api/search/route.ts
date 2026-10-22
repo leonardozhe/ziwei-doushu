@@ -48,7 +48,8 @@ export async function GET(request: Request) {
     : undefined;
 
   const genderParam = url.searchParams.get('gender');
-  const gender = genderParam === 'male' || genderParam === 'female' ? genderParam : undefined;
+  const gender: 'male' | 'female' | undefined =
+    genderParam === 'male' || genderParam === 'female' ? genderParam : undefined;
 
   const mingzhuParam = url.searchParams.get('mingzhu');
   const mingzhu = mingzhuParam && (MINGZHU_LIST as readonly string[]).includes(mingzhuParam)
