@@ -3,6 +3,7 @@ import { useState } from 'react';
 import BirthForm from '@/components/BirthForm';
 import ChartBoard from '@/components/ChartBoard';
 import InsightPanel from '@/components/InsightPanel';
+import DatasetReading from '@/components/DatasetReading';
 import TimeNav, { type TimeView } from '@/components/TimeNav';
 import { generateChart } from '@/lib/ziwei/algorithm';
 import type { BirthInfo, ZiweiChart, Palace } from '@/lib/ziwei/types';
@@ -70,6 +71,18 @@ export default function ChartPage() {
         <ChartBoard chart={chart} onPalaceSelect={setSelectedPalace} />
         <InsightPanel chart={chart} selectedPalace={selectedPalace} />
       </div>
+
+      {/* 解读数据集 v4.0：这一张盘在数据集里的 13 维解读（确定性，无需 API Key） */}
+      <section style={{ maxWidth: 1280, margin: '40px auto 0', padding: '0 16px' }}>
+        <h2 style={{ fontSize: 20, fontWeight: 700, marginBottom: 12 }}>命盘解读数据集</h2>
+        <DatasetReading
+          year={chart.birthInfo.year}
+          month={chart.birthInfo.month}
+          day={chart.birthInfo.day}
+          hour={chart.birthInfo.hour}
+          gender={chart.birthInfo.gender}
+        />
+      </section>
     </main>
   );
 }
