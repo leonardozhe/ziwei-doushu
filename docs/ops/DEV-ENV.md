@@ -190,7 +190,41 @@ curl -s "http://127.0.0.1:3020/api/search?q=太阳&mingzhu=天府&limit=5"
 
 ---
 
-## 7. Git 工作流
+## 7. CI
+
+| 工作流 | 触发 | 内容 |
+|---|---|---|
+| `ci.yml` | push / PR | 类型检查 + 全部排盘回归（无数据库，~60s） |
+| `ci-db.yml` | 手动 / 每天 03:17 UTC | 真实 Postgres 16 容器：建表 → 造样本 → 数据库层回归（~110s） |
+
+数据库层回归需要表里真有数据，所以用 `scripts/ingest/make-sample.ts` 造一份小样本
+（3 年 × 12 时辰 × 2 性别 × 13 维，内容含真实术语，命宫主星由引擎算出）。
+这让「引擎口径 ↔ 数据集口径一致」和「术语倒排检索正确」能在每次 CI 里被验证。
+
+```bash
+# 本地跑数据库层回归
+export DATABASE_URL="postgresql://ziwei:ziwei_dev_pwd@127.0.0.1:5435/ziwei_ci_test"
+psql ... -c 'CREATE DATABASE ziwei_ci_test;'
+psql ... -d ziwei_ci_test -f scripts/ingest/schema.sql
+npx tsx scripts/ingest/make-sample.ts
+npx tsx scripts/regression/term-search.test.ts
+npx tsx scripts/regression/dataset-alignment.test.ts
+```
+
+## 8. 生产服务
+
+```bash
+sudo cp deploy/ziwei.service /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable --now ziwei
+
+systemctl status ziwei
+curl -s http://127.0.0.1:3020/api/health
+```
+
+实测生产环境性能：检索 10–20ms，页面 9–12ms，进程内存 54MB。
+
+## 9. Git 工作流
 
 - 上游仓库 `Renhuai123/ziwei-doushu` —— **只读**，定期 `git fetch upstream` 同步引擎更新
 - 我们的仓库 `leonardozhe/ziwei-doushu` —— 唯一开发仓库，服务器直推
