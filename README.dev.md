@@ -22,8 +22,8 @@
 | 解读数据 | 只有压缩包 | **已全量入库 Postgres**（877 万段，可检索） |
 | 排盘能力 | 只在浏览器里跑 | **暴露成 API**，前端/移动端/第三方共用同一口径 |
 | 解读读取 | 无 | **`GET /api/reading`** 直接返回 13 维文本 |
-| 语义检索 | 无 | **`GET /api/search`** pg_trgm 中文子串检索 |
-| 界面语言 | 纯中文 | **zh/en 双语层**，可加语种 |
+| 语义检索 | 无 | **`GET /api/search`** 术语倒排，5–15ms |
+| 界面语言 | 纯中文 | **zh/en 双语层**，首页 + 公告弹窗已接入 |
 | 健康检查 | 无 | **`GET /api/health`** |
 
 ---
@@ -64,9 +64,35 @@ curl -X POST localhost:3000/api/chart -H 'Content-Type: application/json' \
 # 解读（时辰序号 0-11，子=0）
 curl "localhost:3000/api/reading?year=1990&month=1&day=1&hour=0&gender=male"
 
-# 检索
+# 检索（术语走倒排表，毫秒级）
 curl "localhost:3000/api/search?q=天府&limit=5"
 ```
+
+### 命盘链接可直接分享
+
+```
+/chart?y=1990&m=1&d=1&h=4&g=male
+```
+
+`h` 是**时辰序号 0–11**（子=0 … 亥=11），与数据集口径一致，不是钟点。
+
+---
+
+## 检索架构
+
+v4.0 全量 877 万段解读（204 亿字符）上，任意子串检索**无法走索引**——
+`ILIKE '%kw%'` 前后都通配时 GIN trgm 提取不到 trigram，实测跨年 6 年范围要 65 秒。
+
+解法是**术语倒排**：命理术语是有限集合（157 个），把「哪张盘提到哪个术语」
+预计算成倒排表，检索就是索引扫描。
+
+| 表 | 行数 | 说明 |
+|---|---|---|
+| `ziwei_charts` | 674,976 | 命盘主表 |
+| `ziwei_readings` | 8,774,688 | 解读正文（13 维） |
+| `ziwei_sections` | 82,685,950 | 解读小节（26 种标题） |
+| `ziwei_terms` | 157 | 命理术语表 |
+| `ziwei_term_charts` | 52,573,091 | 术语 → 命盘 倒排 |
 
 ---
 
@@ -77,6 +103,7 @@ curl "localhost:3000/api/search?q=天府&limit=5"
 | `lib/ziwei/` | 排盘引擎（上游） |
 | `lib/db/` | Postgres 接入层：连接池、13 维定义、检索 |
 | `lib/i18n/` | 国际化字典层与 Provider |
+| `lib/ziwei/terms.ts` | 命理术语表（157 个），检索倒排的词表来源 |
 | `app/api/` | 排盘 / 解读 / 检索 / 健康检查 |
 | `components/DatasetReading.tsx` | 数据集解读面板（确定性，无需 API Key） |
 | `scripts/ingest/` | 数据集入库管线 |
