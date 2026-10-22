@@ -12,10 +12,14 @@ SELECT
 FROM ziwei_readings r
 JOIN ziwei_charts c USING (chart_key)
 CROSS JOIN LATERAL (
-  SELECT part.ord::int AS ord,
-         coalesce((regexp_match(part.txt, '^\s*\*\*【([^】]+)】\*\*'))[1], '') AS heading,
-         regexp_replace(part.txt, '^\s*\*\*【[^】]+】\*\*\s*', '', 'g') AS body
-    FROM unnest(regexp_split_to_table(r.content, '\*\*【[^】]+】\*\*') WITH ORDINALITY AS part(txt, ord)) AS part
+  SELECT
+    (row_number() OVER (ORDER BY part.ord))::int AS ord,
+    coalesce((regexp_match(part.txt, '^\s*\*\*【([^】]+)】\*\*'))[1], '') AS heading,
+    regexp_replace(part.txt, '^\s*\*\*【[^】]+】\*\*\s*', '', 'g') AS body
+  FROM (
+    SELECT txt, ord FROM regexp_split_to_table(r.content, '\*\*【[^】]+】\*\*')
+      WITH ORDINALITY AS p(txt, ord)
+  ) AS part
 ) s
 WHERE c.birth_year = 1990;
 
@@ -25,5 +29,4 @@ FROM stg;
 
 SELECT heading, count(*) FROM stg GROUP BY 1 ORDER BY 2 DESC LIMIT 8;
 
--- 看一条
 SELECT heading, left(content, 200) FROM stg WHERE heading = '一句话定调' LIMIT 1;
