@@ -39,11 +39,15 @@ function ChartPageInner() {
   // ── URL 直达：/chart?y=1990&m=1&d=1&h=4&g=male 直接起盘 ──
   useEffect(() => {
     const birth = parseBirthFromSearch(searchParams);
+    console.log('[chart] url params', searchParams.toString(), '->', JSON.stringify(birth));
     if (!birth) return;
     try {
-      setChart(generateChart(birth));
-    } catch {
+      const c = generateChart(birth);
+      console.log('[chart] generated', c.mingZhu);
+      setChart(c);
+    } catch (err) {
       // 日期不存在等非法参数：留在表单页让用户改
+      console.error('[chart] generateChart failed', err);
       setChart(null);
     }
   }, [searchParams]);
