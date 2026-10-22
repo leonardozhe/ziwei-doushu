@@ -1,5 +1,5 @@
 import { getPool } from '@/lib/db/client';
-import { searchReadings, countMatchingCharts, MINGZHU_LIST, type SearchFilters } from '@/lib/db/search';
+import { searchReadings, countMatchingCharts, MINGZHU_LIST, HEADING_LIST, type SearchFilters } from '@/lib/db/search';
 import { TOPIC_LABELS, TOPICS, type Topic } from '@/lib/db/readings';
 import { apiError, apiOk } from '@/lib/api/response';
 
@@ -46,8 +46,14 @@ export async function GET(request: Request) {
     ? mingzhuParam
     : undefined;
 
+  const headingParam = url.searchParams.get('heading');
+  const heading = headingParam && (HEADING_LIST as readonly string[]).includes(headingParam)
+    ? headingParam
+    : undefined;
+
   const filters: SearchFilters = {
     topic,
+    heading,
     gender,
     mingzhu,
     year: intParam('year'),
@@ -64,12 +70,13 @@ export async function GET(request: Request) {
     filters.yearTo !== undefined ||
     filters.gender !== undefined ||
     filters.mingzhu !== undefined ||
-    filters.topic !== undefined;
+    filters.topic !== undefined ||
+    filters.heading !== undefined;
 
   if (!hasNarrowing) {
     return apiError(
       '全库检索会扫描 877 万段解读，请至少加一个过滤条件：' +
-      'year / yearFrom / yearTo / gender / topic / mingzhu',
+      'year / yearFrom / yearTo / gender / topic / heading / mingzhu',
       400,
       { hint: '例如 /api/search?q=天府&year=1990' },
     );
@@ -96,6 +103,8 @@ export async function GET(request: Request) {
           topic: t,
           label: TOPIC_LABELS[t as Topic] ?? t,
         })),
+        matchingHeadings: h.matching_headings,
+        snippetHeading: h.snippet_heading,
         snippet: h.snippet,
       })),
     });
