@@ -145,7 +145,8 @@ async function main() {
          FROM scan, LATERAL regexp_matches(scan.content, $1, 'g') AS m(w)
      )
      INSERT INTO ziwei_term_charts (term_id, chart_key, hits, birth_year, gender, mingzhu)
-     SELECT t.id, h.chart_key, count(*)::int, min(h.birth_year)::int, min(h.gender), min(h.mingzhu)
+     SELECT t.id, h.chart_key, count(*)::int, min(h.birth_year)::int,
+            coalesce(min(h.gender), ''), coalesce(min(h.mingzhu), '')
        FROM hits h JOIN ziwei_terms t ON t.term = h.term
       GROUP BY t.id, h.chart_key`,
     [pattern],
