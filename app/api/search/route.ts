@@ -1,11 +1,17 @@
 import { getPool } from '@/lib/db/client';
-import { searchReadings, TOPIC_LABELS, TOPICS, type Topic } from '@/lib/db/readings';
+import { searchReadings, countMatchingCharts, MINGZHU_LIST, type SearchFilters } from '@/lib/db/search';
+import { TOPIC_LABELS, TOPICS, type Topic } from '@/lib/db/readings';
 import { apiError, apiOk } from '@/lib/api/response';
 
 /**
- * GET /api/search?q=关键词&limit=&offset=&topic=
+ * GET /api/search?q=关键词&limit=&offset=&topic=&year=&yearFrom=&yearTo=&gender=&mingzhu=
  *
- * 在解读正文里做中文子串检索（pg_trgm）。
+ * 在解读正文里做中文子串检索，按「命盘命中段数」排序。
+ *
+ * 性能说明：v4.0 全量 877 万段解读中，「天府」这类高频词命中 39% 的段落，
+ * 纯全文相似度排序会退化成全表扫描（实测 6 分钟）。这里用
+ * **ILIKE 命中 + 按盘聚合** 的方式，并把年份/性别/维度/命宫主星作为前置过滤器，
+ * 让常见查询在可接受时间内返回。
  */
 export async function GET(request: Request) {
   if (!getPool()) {
@@ -17,18 +23,47 @@ export async function GET(request: Request) {
   if (!q) return apiError('q (keyword) is required');
   if (q.length < 2) return apiError('keyword must be at least 2 characters');
 
-  const limit = Math.min(Number(url.searchParams.get('limit') ?? 20) || 20, 100);
-  const offset = Math.max(Number(url.searchParams.get('offset') ?? 0) || 0, 0);
+  const intParam = (k: string) => {
+    const raw = url.searchParams.get(k);
+    if (raw === null || raw === '') return undefined;
+    const n = Number(raw);
+    return Number.isInteger(n) ? n : undefined;
+  };
+
+  const limit = Math.min(intParam('limit') ?? 20, 100);
+  const offset = Math.max(intParam('offset') ?? 0, 0);
+
   const topicParam = url.searchParams.get('topic');
   const topic = topicParam && (TOPICS as readonly string[]).includes(topicParam)
     ? (topicParam as Topic)
-    : null;
+    : undefined;
+
+  const genderParam = url.searchParams.get('gender');
+  const gender = genderParam === 'male' || genderParam === 'female' ? genderParam : undefined;
+
+  const mingzhuParam = url.searchParams.get('mingzhu');
+  const mingzhu = mingzhuParam && (MINGZHU_LIST as readonly string[]).includes(mingzhuParam)
+    ? mingzhuParam
+    : undefined;
+
+  const filters: SearchFilters = {
+    topic,
+    gender,
+    mingzhu,
+    year: intParam('year'),
+    yearFrom: intParam('yearFrom'),
+    yearTo: intParam('yearTo'),
+  };
 
   try {
-    const hits = await searchReadings(q, { limit, offset, topic: topic ?? undefined });
+    const hits = await searchReadings(q, { ...filters, limit, offset });
+    const total = await countMatchingCharts(q, filters);
+
     return apiOk({
       query: q,
       count: hits.length,
+      totalCharts: total,
+      filters,
       results: hits.map((h) => ({
         chartKey: h.chart_key,
         birth: {
@@ -36,10 +71,11 @@ export async function GET(request: Request) {
           hour: h.birth_hour, gender: h.gender,
         },
         mingzhu: h.mingzhu,
-        topic: h.topic,
-        topicLabel: TOPIC_LABELS[h.topic as Topic] ?? h.topic,
-        charCount: h.char_count,
-        similarity: Number(h.similarity.toFixed(4)),
+        hits: h.hits,
+        matchingTopics: h.matching_topics.map((t) => ({
+          topic: t,
+          label: TOPIC_LABELS[t as Topic] ?? t,
+        })),
         snippet: h.snippet,
       })),
     });
