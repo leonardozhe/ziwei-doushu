@@ -2,18 +2,20 @@ import { query } from './client';
 import type { Topic } from './readings';
 
 /**
- * 解读正文检索。
+ * 解读检索 —— 基于**小节表** `ziwei_sections`。
  *
- * 设计要点（基于 v4.0 全量数据的实测）：
- *   数据集里「天府」这类高频主星名出现在 **345 万 / 877 万**段解读中（39%）。
- *   对全文做相似度排序（`content % keyword`）或无过滤的 ILIKE 都会退化成全表扫描
- *   —— 实测单次 6 分钟。
+ * 为什么不用 `ziwei_readings.content` 直接检索（v4.0 全量实测）：
+ *   - `content ILIKE '%kw%'`：前后都通配时 GIN trgm 索引无法提取 trigram，
+ *     走不了索引 → 全表扫描，实测跨年 > 2 分钟
+ *   - `content % 'kw'`：能走索引，但在 2.3KB 中文长文本上比全表扫描还慢
  *
- *   所以这里改成**按盘聚合的子串命中**：
- *     - 命中段数作为排序键（一个盘里出现 3 次比另一个盘出现 1 次更相关）
- *     - 支持按年份 / 性别 / 维度 / 命宫主星过滤，先把候选集缩小
- *     - 执行顺序：先用 ziwei_charts 的索引筛候选盘，再在候选盘内做 ILIKE
- *       （实测 1990 年单年查询 1.8 秒）
+ * 怎么解决：
+ *   把每段解读按 **【小节标题】** 拆成独立行（小节标题是有限集合，实测 26 种）。
+ *   每行内容变短（平均 ~200 字），trgm 索引终于能真正用上。
+ *   实测：877 万段 → 91,460,638 个小节，平均 10.4 个/段。
+ *
+ * 排序语义：**命盘命中段数**优先（一个盘里出现 3 次比另一个盘出现 1 次更相关），
+ * 其次按年份倒序。语义是「哪些盘在讲这件事」。
  */
 
 /** 命宫主星的取值集合（用于过滤） */
@@ -22,12 +24,23 @@ export const MINGZHU_LIST = [
   '贪狼', '巨门', '天相', '天梁', '七杀', '破军',
 ] as const;
 
+/** 小节标题的取值集合（实测 26 种） */
+export const HEADING_LIST = [
+  '命格总览', '性格总览', '感情总览', '事业总览', '财运总览', '健康总览',
+  '兄弟总览', '子女总览', '迁移总览', '人际总览', '田宅总览', '福德总览', '父母总览',
+  '一句话定调', '核心论断', '命盘依据', '三方四正联动', '命盘推演',
+  '身宫 · 后天追求', '针对你的命盘', '⚠️ 风险提醒',
+  '四化路径分析 · 落到你这盘', '四化路径 · 你这盘', '年干四化·关键宫位影响',
+  '倪师子午流注 · 宫位取象（流派参考）', '经典出处', '（前言）',
+] as const;
+
 export interface SearchFilters {
   year?: number;
   yearFrom?: number;
   yearTo?: number;
   gender?: 'male' | 'female';
   topic?: Topic;
+  heading?: string;
   mingzhu?: string;
 }
 
@@ -41,21 +54,12 @@ export interface SearchHit {
   mingzhu: string | null;
   hits: number;
   matching_topics: string[];
+  matching_headings: string[];
   snippet: string;
+  snippet_heading: string;
 }
 
-/**
- * 转义 ILIKE 模式里的特殊字符（% _ \），避免用户输入被当成通配符。
- * 转义符用默认的 \（standard_conforming_strings=on）。
- */
-function escapeLike(s: string): string {
-  return s.replace(/([\\%_])/g, '\\$1');
-}
-
-/**
- * 构造「命盘表」侧的过滤条件。
- * 返回 where 片段数组，参数按出现顺序压入 params（占位符编号从 params.length 起算）。
- */
+/** 构造「命盘表」侧的过滤条件 */
 function chartFilterClauses(f: SearchFilters, params: unknown[]): string[] {
   const clauses: string[] = [];
 
@@ -90,28 +94,27 @@ export async function searchReadings(
   const limit = Math.min(opts.limit ?? 20, 100);
   const offset = Math.max(opts.offset ?? 0, 0);
 
-  // 参数顺序：$1 永远是关键词（含通配符），其后是过滤条件，最后是 limit/offset
-  // ILIKE 不带 % 就是精确匹配 —— 子串检索必须自己加通配符
+  // $1 = 关键词（含通配符）；$2 = 裸关键词（用于 snippet 定位）
   const params: unknown[] = [`%${escapeLike(keyword)}%`];
-
   const chartClauses = chartFilterClauses(opts, params);
 
-  // topic 作用于解读表，不是命盘表，单独成句
   let topicClause = '';
   if (opts.topic) {
     params.push(opts.topic);
-    topicClause = `AND r.topic = $${params.length}`;
+    topicClause = `AND s.topic = $${params.length}`;
+  }
+  let headingClause = '';
+  if (opts.heading) {
+    params.push(opts.heading);
+    headingClause = `AND s.heading = $${params.length}`;
   }
 
+  params.push(keyword);
+  const rawIdx = params.length;
   params.push(limit, offset);
   const limitIdx = params.length - 1;
   const offsetIdx = params.length;
 
-  // 裸关键词（无通配符），用于 snippet 里定位命中位置
-  params.push(keyword);
-  const rawKeywordIdx = params.length;
-
-  // 先按盘过滤（走 ziwei_charts 索引）缩小候选集，再在候选盘内做 ILIKE
   return query<SearchHit>(
     `WITH cand AS (
        SELECT c.chart_key, c.birth_year
@@ -119,16 +122,18 @@ export async function searchReadings(
         WHERE ${chartClauses.length ? chartClauses.join(' AND ') : 'TRUE'}
      ),
      hit AS (
-       SELECT cand.chart_key,
+       SELECT s.chart_key,
               cand.birth_year,
-              count(*)                    AS hits,
-              array_agg(DISTINCT r.topic) AS matching_topics,
-              min(r.id)                   AS first_id
+              count(*)                          AS hits,
+              array_agg(DISTINCT s.topic)       AS matching_topics,
+              array_agg(DISTINCT s.heading)     AS matching_headings,
+              min(s.id)                         AS first_id
          FROM cand
-         JOIN ziwei_readings r USING (chart_key)
-        WHERE r.content ILIKE $1
+         JOIN ziwei_sections s USING (chart_key)
+        WHERE s.content ILIKE $1
           ${topicClause}
-        GROUP BY cand.chart_key, cand.birth_year
+          ${headingClause}
+        GROUP BY s.chart_key, cand.birth_year
         ORDER BY hits DESC, cand.birth_year DESC
         LIMIT $${limitIdx} OFFSET $${offsetIdx}
      )
@@ -137,12 +142,12 @@ export async function searchReadings(
             c.gender, c.mingzhu,
             h.hits,
             h.matching_topics,
-            -- snippet 定位到关键词命中处：ILIKE 模式去掉通配符后取位置
-            (SELECT substring(r2.content
-                               from greatest(1, position($${rawKeywordIdx} in r2.content) - 40)
+            h.matching_headings,
+            (SELECT s2.heading FROM ziwei_sections s2 WHERE s2.id = h.first_id) AS snippet_heading,
+            (SELECT substring(s2.content
+                               from greatest(1, position($${rawIdx} in s2.content) - 40)
                                for 220)
-               FROM ziwei_readings r2
-              WHERE r2.id = h.first_id) AS snippet
+               FROM ziwei_sections s2 WHERE s2.id = h.first_id) AS snippet
        FROM hit h
        JOIN ziwei_charts c USING (chart_key)
       ORDER BY h.hits DESC, c.birth_year DESC`,
@@ -150,7 +155,7 @@ export async function searchReadings(
   );
 }
 
-/** 命中该关键词的命盘总数（用于展示「共 N 张盘提到」） */
+/** 命中该关键词的命盘总数 */
 export async function countMatchingCharts(
   keyword: string,
   filters: SearchFilters = {},
@@ -161,17 +166,28 @@ export async function countMatchingCharts(
   let topicClause = '';
   if (filters.topic) {
     params.push(filters.topic);
-    topicClause = `AND r.topic = $${params.length}`;
+    topicClause = `AND s.topic = $${params.length}`;
+  }
+  let headingClause = '';
+  if (filters.heading) {
+    params.push(filters.heading);
+    headingClause = `AND s.heading = $${params.length}`;
   }
 
   const rows = await query<{ n: string }>(
-    `SELECT count(DISTINCT r.chart_key) AS n
+    `SELECT count(DISTINCT s.chart_key) AS n
        FROM ziwei_charts c
-       JOIN ziwei_readings r USING (chart_key)
-      WHERE r.content ILIKE $1
+       JOIN ziwei_sections s USING (chart_key)
+      WHERE s.content ILIKE $1
         ${topicClause}
+        ${headingClause}
         ${chartClauses.length ? 'AND ' + chartClauses.join(' AND ') : ''}`,
     params,
   );
   return Number(rows[0]?.n ?? 0);
+}
+
+/** 转义 ILIKE 模式里的特殊字符 */
+function escapeLike(s: string): string {
+  return s.replace(/([\\%_])/g, '\\$1');
 }
