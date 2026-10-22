@@ -106,7 +106,8 @@ export async function searchReadings(
         WHERE ${chartClauses.length ? chartClauses.join(' AND ') : 'TRUE'}
      ),
      hit AS (
-       SELECT r.chart_key,
+       SELECT cand.chart_key,
+              cand.birth_year,
               count(*)                    AS hits,
               array_agg(DISTINCT r.topic) AS matching_topics,
               min(r.id)                   AS first_id
@@ -114,8 +115,8 @@ export async function searchReadings(
          JOIN ziwei_readings r USING (chart_key)
         WHERE r.content ILIKE $1
           ${topicClause}
-        GROUP BY r.chart_key, c.birth_year
-        ORDER BY hits DESC, c.birth_year DESC
+        GROUP BY cand.chart_key, cand.birth_year
+        ORDER BY hits DESC, cand.birth_year DESC
         LIMIT $${limitIdx} OFFSET $${offsetIdx}
      )
      SELECT h.chart_key,
