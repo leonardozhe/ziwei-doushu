@@ -109,7 +109,10 @@ export async function GET(request: Request) {
     let textTotal = 0;
     let textSearchSkipped = false;
 
-    if (hasNarrowing) {
+    // 术语精确命中时不再跑全文路径：
+    //   全文 ILIKE 要扫 877 万段正文，即使带过滤也要几十秒；
+    //   而术语倒排已经给出更准的结果（命中段数 + 命宫主星）。
+    if (hasNarrowing && !matchedTerm) {
       const hits = await searchReadings(q, {
         ...filters, topic, heading, limit, offset,
       });
@@ -132,6 +135,9 @@ export async function GET(request: Request) {
         snippet: h.snippet,
       }));
     } else if (!matchedTerm) {
+      textSearchSkipped = true;
+    } else {
+      // 术语已命中，跳过全文路径
       textSearchSkipped = true;
     }
 
