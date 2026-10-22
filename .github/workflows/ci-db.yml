@@ -1,0 +1,73 @@
+name: CI (Database)
+
+on:
+  workflow_dispatch:
+  schedule:
+    # 每天凌晨跑一次（cron 用 UTC，03:17 是避开整点的惯例）
+    - cron: '17 3 * * *'
+
+jobs:
+  db:
+    name: 数据库层回归
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: ziwei
+          POSTGRES_PASSWORD: ziwei_test
+          POSTGRES_DB: ziwei_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U ziwei"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+
+      - name: 安装依赖
+        run: npm ci --no-audit --no-fund
+
+      - name: 启用 pg_trgm 扩展
+        env:
+          PGPASSWORD: ziwei_test
+        run: |
+          psql -h 127.0.0.1 -U ziwei -d ziwei_test -c 'CREATE EXTENSION IF NOT EXISTS pg_trgm;'
+
+      - name: 建表结构
+        env:
+          PGPASSWORD: ziwei_test
+        run: |
+          psql -h 127.0.0.1 -U ziwei -d ziwei_test -v ON_ERROR_STOP=1 \
+            -f scripts/ingest/schema.sql
+
+      - name: 灌入小样本数据（模拟真实数据集的结构与内容分布）
+        env:
+          PGPASSWORD: ziwei_test
+          DATABASE_URL: postgresql://ziwei:ziwei_test@127.0.0.1:5432/ziwei_test
+        run: |
+          # 造 3 年 × 12 时辰 × 2 性别 × 13 维的小样本，验证表结构与查询口径
+          npx tsx scripts/ingest/make-sample.ts
+
+      - name: 数据库层回归
+        env:
+          DATABASE_URL: postgresql://ziwei:ziwei_test@127.0.0.1:5432/ziwei_test
+        run: |
+          npx tsx scripts/regression/term-search.test.ts
+          npx tsx scripts/regression/dataset-alignment.test.ts
+
+      - name: 检查表结构与索引
+        env:
+          PGPASSWORD: ziwei_test
+        run: |
+          psql -h 127.0.0.1 -U ziwei -d ziwei_test -c "
+            SELECT relname, n_live_tup FROM pg_stat_user_tables ORDER BY 1;"
