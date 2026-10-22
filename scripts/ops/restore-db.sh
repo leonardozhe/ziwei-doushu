@@ -214,6 +214,10 @@ if ! ziwei_pg_db_exists "$TARGET_DB"; then
   fi
 fi
 
+# pg_dump --table=... 不带 CREATE EXTENSION，但会带依赖扩展的索引；
+# 这里先把扩展建好，否则恢复时索引会失败。
+ziwei_ensure_extensions "$TARGET_DB" || ziwei_die "扩展准备失败，无法恢复" "$ZIWEI_EX_RESTORE"
+
 # 恢复模式：
 #   dump —— 有 ziwei.dump 时默认走这条（dump 自带结构+数据）
 #   sql  —— 没有 dump，或显式 --prefer-sql 时走 schema.sql + data.sql

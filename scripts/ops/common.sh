@@ -214,3 +214,24 @@ ziwei_rpad() {
   pad=$(( width - cur ))
   printf '%s%*s' "$s" "$pad" ''
 }
+
+# ── 扩展处理 ─────────────────────────────────────────────
+# pg_dump --table=... 不会带出 CREATE EXTENSION，
+# 但会带出依赖扩展的索引（如 pg_trgm 的 GIN 索引），
+# 目标库没有扩展时恢复会直接失败。这里统一在恢复前建好扩展。
+ziwei_ensure_extensions() {
+  local db="$1" ext
+  # 需要在目标库存在的扩展（缺一个就会导致索引建不出来）
+  local wanted="pg_trgm"
+  for ext in $wanted; do
+    if ziwei_pg_scalar "$db" "SELECT count(*) FROM pg_extension WHERE extname = '$ext'" 2>/dev/null | grep -q '^1$'; then
+      ziwei_log "扩展 $ext 已存在"
+    else
+      ziwei_log "创建扩展 $ext"
+      if ! ziwei_pg_scalar "$db" "CREATE EXTENSION IF NOT EXISTS \"$ext\"" >/dev/null 2>&1; then
+        ziwei_err "创建扩展 $ext 失败 —— 目标库可能缺少 contrib 模块"
+        return 1
+      fi
+    fi
+  done
+}

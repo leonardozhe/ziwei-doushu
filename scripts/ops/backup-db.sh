@@ -146,6 +146,11 @@ DB_SIZE_BYTES="$(ziwei_pg_scalar "$DB" 'SELECT pg_database_size(current_database
 DB_SIZE_HUMAN="$(ziwei_pg_scalar "$DB" 'SELECT pg_size_pretty(pg_database_size(current_database()))' | tr -d '[:space:]')"
 ziwei_log "Postgres $PG_VERSION ｜ 库大小 $DB_SIZE_HUMAN（$DB_SIZE_BYTES 字节）"
 
+# 确认关键扩展在源库存在（pg_trgm 缺失会让检索层与小节索引不可用）
+if [[ "$(ziwei_pg_scalar "$DB" "SELECT count(*) FROM pg_extension WHERE extname = 'pg_trgm'" | tr -d '[:space:]')" != "1" ]]; then
+  ziwei_warn "源库缺少 pg_trgm 扩展 —— 检索层与 trgm 索引不会出现在备份里"
+fi
+
 TABLE_SQL="SELECT table_schema||'.'||table_name FROM information_schema.tables
             WHERE table_type='BASE TABLE' AND table_schema NOT IN ('pg_catalog','information_schema')
             ORDER BY 1"
