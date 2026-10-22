@@ -50,7 +50,7 @@ async function main() {
   // birth_year 冗余存进倒排表，排序时不必 join 命盘表
   const res = await client2.query(
     `WITH scan AS (
-       SELECT s.chart_key, c.birth_year, s.content
+       SELECT s.chart_key, c.birth_year, c.gender, c.mingzhu, s.content
          FROM ziwei_sections s
          JOIN ziwei_charts c USING (chart_key)
         WHERE s.heading IN (
@@ -63,12 +63,15 @@ async function main() {
      hits AS (
        SELECT scan.chart_key,
               scan.birth_year,
+              scan.gender,
+              scan.mingzhu,
               (m.w)[1] AS term
          FROM scan,
               LATERAL regexp_matches(scan.content, $1, 'g') AS m(w)
      )
-     INSERT INTO ziwei_term_charts (term_id, chart_key, hits, birth_year)
-     SELECT t.id, h.chart_key, count(*)::int, min(h.birth_year)::int
+     INSERT INTO ziwei_term_charts (term_id, chart_key, hits, birth_year, gender, mingzhu)
+     SELECT t.id, h.chart_key, count(*)::int, min(h.birth_year)::int,
+            min(h.gender), min(h.mingzhu)
        FROM hits h
        JOIN ziwei_terms t ON t.term = h.term
       GROUP BY t.id, h.chart_key`,

@@ -26,8 +26,12 @@ CREATE TABLE IF NOT EXISTS ziwei_term_charts (
   term_id    bigint NOT NULL REFERENCES ziwei_terms(id) ON DELETE CASCADE,
   chart_key  text   NOT NULL REFERENCES ziwei_charts(chart_key) ON DELETE CASCADE,
   hits       int    NOT NULL,
-  -- 冗余存出生年：排序用 (term_id, hits DESC, birth_year DESC) 时不必再 join 命盘表
+  -- 冗余存出生年 / 性别 / 命宫主星：
+  --   排序与过滤全在倒排表内完成，不必 join 命盘表
+  --   （实测 join 命盘表 1773ms vs 不 join 26ms，差 70 倍）
   birth_year int    NOT NULL DEFAULT 0,
+  gender     text   NOT NULL DEFAULT '',
+  mingzhu    text   NOT NULL DEFAULT '',
   PRIMARY KEY (term_id, chart_key)
 );
 

@@ -64,15 +64,15 @@ export async function searchTerms(
     innerWhere.push(`birth_year <= $${params.length}`);
   }
 
-  // 性别 / 命宫主星只存在于命盘表，作用在外层
-  const outerWhere: string[] = [];
+  // 性别 / 命宫主星同样走倒排表冗余列（join 命盘表实测 1773ms，
+  // 不 join 只要 26ms —— 差 70 倍）
   if (opts.gender) {
     params.push(opts.gender);
-    outerWhere.push(`c.gender = $${params.length}`);
+    innerWhere.push(`gender = $${params.length}`);
   }
   if (opts.mingzhu) {
     params.push(opts.mingzhu);
-    outerWhere.push(`c.mingzhu = $${params.length}`);
+    innerWhere.push(`mingzhu = $${params.length}`);
   }
 
   params.push(limit, offset);
@@ -95,8 +95,7 @@ export async function searchTerms(
           LIMIT $${limitIdx} OFFSET $${offsetIdx}
        ) tc
        JOIN ziwei_terms t ON t.id = tc.term_id
-       JOIN ziwei_charts c ON c.chart_key = tc.chart_key
-       ${outerWhere.length ? 'WHERE ' + outerWhere.join(' AND ') : ''}`,
+       JOIN ziwei_charts c ON c.chart_key = tc.chart_key`,
     params,
   );
 }
@@ -123,21 +122,21 @@ export async function countTermCharts(
   }
   if (opts.gender) {
     params.push(opts.gender);
-    where.push(`c.gender = $${params.length}`);
+    where.push(`tc.gender = $${params.length}`);
   }
   if (opts.mingzhu) {
     params.push(opts.mingzhu);
-    where.push(`c.mingzhu = $${params.length}`);
+    where.push(`tc.mingzhu = $${params.length}`);
   }
 
   // 注意：不要用 count(DISTINCT tc.chart_key) ——
   //   (term_id, chart_key) 本来就是主键，天然唯一；
   //   DISTINCT 让 Postgres 去重，实测 3546ms vs 38ms（慢 100 倍）。
+  // 同理：不 join 命盘表（1773ms → 26ms）
   const rows = await query<{ n: string }>(
     `SELECT count(*) AS n
        FROM ziwei_term_charts tc
        JOIN ziwei_terms t ON t.id = tc.term_id
-       JOIN ziwei_charts c ON c.chart_key = tc.chart_key
       WHERE t.term = $1
         ${where.length ? 'AND ' + where.join(' AND ') : ''}`,
     params,

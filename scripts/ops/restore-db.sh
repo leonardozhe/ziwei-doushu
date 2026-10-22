@@ -17,6 +17,8 @@
 #   --data-only       只灌数据（跳过 schema）
 #   --schema-only     只灌结构
 #   --prefer-sql      强制走 SQL 路径（schema.sql + data.sql），默认有 ziwei.dump 时优先用 pg_restore
+#   --skip-index      恢复时跳过索引（pg_restore --no-index），数据灌完再单独 CREATE INDEX
+#                     —— trgm 索引在 877 万行中文长文本上极慢，跳过可让恢复快数倍
 #   --jobs <n>        pg_restore 并行度（默认 2）
 #   --no-drop         不 DROP 目标库（要求目标库为空）
 #   -h, --help        显示帮助
@@ -44,6 +46,7 @@ ASSUME_YES=0
 DATA_ONLY=0
 SCHEMA_ONLY=0
 PREFER_SQL=0
+SKIP_INDEX=0
 JOBS=2
 DO_DROP=1
 
@@ -63,6 +66,7 @@ while (( $# > 0 )); do
     --data-only)    DATA_ONLY=1; SCHEMA_ONLY=0; shift ;;
     --schema-only)  SCHEMA_ONLY=1; DATA_ONLY=0; shift ;;
     --prefer-sql)   PREFER_SQL=1; shift ;;
+    --skip-index)   SKIP_INDEX=1; shift ;;
     --jobs)
       [[ $# -ge 2 ]] || ziwei_die "--jobs 需要参数" "$ZIWEI_EX_USAGE"
       JOBS="$2"; shift 2 ;;
@@ -231,11 +235,34 @@ elif [[ -n "$SCHEMA_FILE" || -n "$DATA_FILE" ]]; then
 fi
 
 if (( USE_DUMP == 1 )); then
+  RESTORE_TOC_ARGS=()
+  if (( SKIP_INDEX == 1 )); then
+    # pg_restore 没有 --no-index；用一份剔除 INDEX / CONSTRAINT / FK 的 TOC 清单代替。
+    # 代价是索引和约束要事后重建 —— 但 trgm 索引在 877 万行中文长文本上极慢，
+    # 跳过它能大幅缩短恢复时间。
+    TOC_LIST="$(mktemp)"
+    # pg_restore -l 的输出就是 --list 接受的格式，原样保留，只剔除 INDEX / TRIGGER 行
+    pg_restore -l "$DUMP_FILE" 2>/dev/null > "$TOC_LIST.raw" || true
+    if [[ ! -s "$TOC_LIST.raw" ]]; then
+      rm -f "$TOC_LIST" "$TOC_LIST.raw"
+      ziwei_die "生成 TOC 清单失败" "$ZIWEI_EX_RESTORE"
+    fi
+    skipped_n="$(grep -cE ' (INDEX|TRIGGER) ' "$TOC_LIST.raw" || true)"
+    grep -vE ' (INDEX|TRIGGER) ' "$TOC_LIST.raw" > "$TOC_LIST" || true
+    rm -f "$TOC_LIST.raw"
+    [[ -s "$TOC_LIST" ]] || { rm -f "$TOC_LIST"; ziwei_die "过滤后的 TOC 清单为空" "$ZIWEI_EX_RESTORE"; }
+    ziwei_warn "按 --skip-index 跳过 $skipped_n 个索引/触发器；数据灌完后需自行重建"
+    RESTORE_TOC_ARGS=(--use-list "$TOC_LIST")
+  fi
+
   ziwei_log "pg_restore ziwei.dump → $TARGET_DB（jobs=$JOBS）"
   if ! pg_restore -h "$PGHOST" -p "$PGPORT" -U "$PGUSER" -d "$TARGET_DB" \
-        --no-owner --no-privileges --exit-on-error --jobs="$JOBS" "$DUMP_FILE"; then
+        --no-owner --no-privileges --exit-on-error --jobs="$JOBS" \
+        "${RESTORE_TOC_ARGS[@]+"${RESTORE_TOC_ARGS[@]}"}" "$DUMP_FILE"; then
+    rm -f "$TOC_LIST" 2>/dev/null || true
     ziwei_die "pg_restore 失败" "$ZIWEI_EX_RESTORE"
   fi
+  rm -f "$TOC_LIST" 2>/dev/null || true
 fi
 
 if (( USE_SQL == 1 )); then
