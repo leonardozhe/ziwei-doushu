@@ -76,17 +76,22 @@ export async function searchTerms(
   const offsetIdx = params.length;
 
   return query<TermHit>(
+    // 排序键 (hits DESC, birth_year DESC) 已在 ziwei_term_charts_rank_idx 里，
+    // 命中集先在索引内 top-N，再 join 命盘表取明细。
     `SELECT t.term, t.term_type,
             c.chart_key, c.birth_year, c.birth_month, c.birth_day, c.birth_hour,
             c.gender, c.mingzhu,
             tc.hits
-       FROM ziwei_term_charts tc
+       FROM (
+         SELECT term_id, chart_key, hits
+           FROM ziwei_term_charts
+          WHERE term_id = (SELECT id FROM ziwei_terms WHERE term = $1)
+            ${where.length ? 'AND ' + where.join(' AND ') : ''}
+          ORDER BY hits DESC, birth_year DESC
+          LIMIT $${limitIdx} OFFSET $${offsetIdx}
+       ) tc
        JOIN ziwei_terms t ON t.id = tc.term_id
-       JOIN ziwei_charts c ON c.chart_key = tc.chart_key
-      WHERE t.term = $1
-        ${where.length ? 'AND ' + where.join(' AND ') : ''}
-      ORDER BY tc.hits DESC, c.birth_year DESC
-      LIMIT $${limitIdx} OFFSET $${offsetIdx}`,
+       JOIN ziwei_charts c ON c.chart_key = tc.chart_key`,
     params,
   );
 }

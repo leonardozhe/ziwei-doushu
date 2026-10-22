@@ -47,10 +47,12 @@ async function main() {
   // 一次扫描。regexp_matches 抽出所有命中词，再用数组包含过滤（只保留在术语表里的）
   await client2.query('TRUNCATE ziwei_term_charts');
 
+  // birth_year 冗余存进倒排表，排序时不必 join 命盘表
   const res = await client2.query(
     `WITH scan AS (
-       SELECT s.chart_key, s.content
+       SELECT s.chart_key, c.birth_year, s.content
          FROM ziwei_sections s
+         JOIN ziwei_charts c USING (chart_key)
         WHERE s.heading IN (
           '命格总览', '性格总览', '感情总览', '事业总览', '财运总览', '健康总览',
           '兄弟总览', '子女总览', '迁移总览', '人际总览', '田宅总览', '福德总览',
@@ -60,12 +62,13 @@ async function main() {
      ),
      hits AS (
        SELECT scan.chart_key,
+              scan.birth_year,
               (m.w)[1] AS term
          FROM scan,
               LATERAL regexp_matches(scan.content, $1, 'g') AS m(w)
      )
-     INSERT INTO ziwei_term_charts (term_id, chart_key, hits)
-     SELECT t.id, h.chart_key, count(*)::int
+     INSERT INTO ziwei_term_charts (term_id, chart_key, hits, birth_year)
+     SELECT t.id, h.chart_key, count(*)::int, min(h.birth_year)::int
        FROM hits h
        JOIN ziwei_terms t ON t.term = h.term
       GROUP BY t.id, h.chart_key`,

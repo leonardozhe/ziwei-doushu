@@ -23,11 +23,15 @@ CREATE TABLE IF NOT EXISTS ziwei_terms (
 );
 
 CREATE TABLE IF NOT EXISTS ziwei_term_charts (
-  term_id  bigint NOT NULL REFERENCES ziwei_terms(id) ON DELETE CASCADE,
-  chart_key text NOT NULL REFERENCES ziwei_charts(chart_key) ON DELETE CASCADE,
-  hits     int NOT NULL,
+  term_id    bigint NOT NULL REFERENCES ziwei_terms(id) ON DELETE CASCADE,
+  chart_key  text   NOT NULL REFERENCES ziwei_charts(chart_key) ON DELETE CASCADE,
+  hits       int    NOT NULL,
+  -- 冗余存出生年：排序用 (term_id, hits DESC, birth_year DESC) 时不必再 join 命盘表
+  birth_year int    NOT NULL DEFAULT 0,
   PRIMARY KEY (term_id, chart_key)
 );
 
-CREATE INDEX IF NOT EXISTS ziwei_term_charts_term_idx ON ziwei_term_charts (term_id, hits DESC);
+-- 排序专用复合索引：让 top-N 排序在索引里完成，不用全量取出再排
+CREATE INDEX IF NOT EXISTS ziwei_term_charts_rank_idx
+  ON ziwei_term_charts (term_id, hits DESC, birth_year DESC);
 CREATE INDEX IF NOT EXISTS ziwei_term_charts_chart_idx ON ziwei_term_charts (chart_key);
