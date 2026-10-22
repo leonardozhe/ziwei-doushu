@@ -6,6 +6,43 @@ import StarField from '@/components/StarField';
 import { useTheme, type Theme } from '@/components/ThemeProvider';
 import AnnouncementModal from '@/components/AnnouncementModal';
 import LocaleSwitcher from '@/components/LocaleSwitcher';
+import { useI18n } from '@/lib/i18n/provider';
+import type { DictKey } from '@/lib/i18n/dict';
+
+// ─── 字典文案里的极简行内标记渲染 ──────────────────────────
+// 约定：**xx** 渲染为 <strong>，__xx__ 渲染为 <em>。
+// 只处理这两种标记，不解析任意 HTML，避免把字典内容当代码执行。
+function RichText({ text, strongColor }: { text: string; strongColor?: string }) {
+  const parts = text.split(/(\*\*[^*]+\*\*|__[^_]+__)/g).filter(Boolean);
+  return (
+    <>
+      {parts.map((part, i) => {
+        if (part.startsWith('**') && part.endsWith('**')) {
+          return <strong key={i} style={strongColor ? { color: strongColor } : undefined}>{part.slice(2, -2)}</strong>;
+        }
+        if (part.startsWith('__') && part.endsWith('__')) {
+          return <em key={i}>{part.slice(2, -2)}</em>;
+        }
+        return <span key={i}>{part}</span>;
+      })}
+    </>
+  );
+}
+
+/** 字典文案里的 \n 转成 <br />（标题换行用） */
+function Multiline({ text }: { text: string }) {
+  const lines = text.split('\n');
+  return (
+    <>
+      {lines.map((line, i) => (
+        <span key={i}>
+          {line}
+          {i < lines.length - 1 && <br />}
+        </span>
+      ))}
+    </>
+  );
+}
 
 // ─── 滚动入场 wrapper ────────────────────────────────────
 function FadeIn({
@@ -39,13 +76,14 @@ function WeakBoundary({ line }: { line: string }) {
 // ─── 主题切换按钮 ────────────────────────────────────────
 function ThemeToggle() {
   const { theme, toggle } = useTheme();
+  const { t } = useI18n();
   const isDark = theme === 'dark';
   return (
     <motion.button
       onClick={toggle}
       whileHover={{ scale: 1.05 }}
       whileTap={{ scale: 0.93 }}
-      aria-label={isDark ? '切换亮色主题' : '切换暗色主题'}
+      aria-label={isDark ? t('home.theme.ariaLight') : t('home.theme.ariaDark')}
       className="flex items-center gap-2 px-3 py-1.5 rounded-full border"
       style={{
         borderColor: isDark ? 'rgba(212,168,67,0.3)' : 'rgba(140,100,20,0.35)',
@@ -74,7 +112,7 @@ function ThemeToggle() {
           color: isDark ? 'rgba(212,180,100,0.85)' : 'rgba(110,72,8,0.8)',
           transition: 'color 0.35s ease',
         }}>
-        {isDark ? '暗色' : '亮色'}
+        {isDark ? t('home.theme.dark') : t('home.theme.light')}
       </span>
     </motion.button>
   );
@@ -89,114 +127,37 @@ const STARS = [
 ];
 
 // ─── 功能模块 ────────────────────────────────────────────
-const FEATURES = [
-  {
-    tag: '排盘体系',
-    title: '倪海厦正宗\n紫微斗数',
-    subtitle: '非简化版，严格遵循倪海厦老师传承',
-    points: [
-      '纳音五行局起盘，不采用网络简化算法',
-      '命宫逆数生时、身宫顺数生时，严格对齐教学规则',
-      '十四主星与四化飞星按原法推演，结构完整可复核',
-    ],
-  },
-  {
-    tag: '命盘呈现',
-    title: '完整十四主星\n四化飞星',
-    subtitle: '结构清晰，一眼看懂主轴与重点',
-    points: [
-      '十四主星完整入宫，主星关系清楚可读',
-      '辅星与煞星同屏呈现，避免关键信息缺失',
-      '庙旺利陷亮度分级，快速识别强弱',
-      '点击任意主星即可查看倪海厦老师对该星的详细解读',
-    ],
-  },
-  {
-    tag: 'AI 解读',
-    title: '深度解盘\n不止于算',
-    subtitle: '倪海厦体系知识库 × Claude AI',
-    points: [
-      '命格分析：从命宫主星出发，结合三方四正，给出全面的性格与人生格局判断',
-      '六大维度解读：事业方向、感情婚姻、财运模式、健康注意、家庭关系、子女缘分',
-      '大限流年追踪：当前10年大限重点、今年流年宫位的具体提示与行动建议',
-      '自由追问：针对你的命盘直接提问，「今年能换工作吗」「什么时候结婚运最好」',
-    ],
-  },
-  {
-    tag: '格局识别',
-    title: '自动检测\n命盘格局',
-    subtitle: '从星曜组合中发现你的命中注定',
-    points: [
-      '自动识别11种经典格局：紫府同宫、杀破狼格、机月同梁、廉相格、武曲七杀等',
-      '辅弼夹命、日月夹命等特殊格局精准检测，并给出倪海厦体系下的标准解读',
-      '四化入命宫迁移宫的特殊状况自动标注，提示需关注的人生议题',
-      '格局按吉凶等级分层展示，让你一目了然自己命盘中的优势与挑战',
-    ],
-  },
+// 文案在组件内用 t() 读取（见 HomePage 里的 features），常量只保留结构与字典 key 前缀。
+type FeatureDef = {
+  /** 字典 key 前缀，如 'home.feature.system' → home.feature.system.tag / .title / .subtitle / .p1.. */
+  key: 'home.feature.system' | 'home.feature.chart' | 'home.feature.ai' | 'home.feature.pattern';
+  /** points 数量，决定用 p1..pN */
+  points: number;
+};
+
+const FEATURE_DEFS: FeatureDef[] = [
+  { key: 'home.feature.system', points: 3 },
+  { key: 'home.feature.chart', points: 4 },
+  { key: 'home.feature.ai', points: 4 },
+  { key: 'home.feature.pattern', points: 4 },
 ];
 
 // ─── 4 大学习板块（hero 后时间轴）──────────────────────────
+// 文案走字典；name/desc/when/note/status 都是字典 key 的一部分。
 const SECTIONS = [
-  {
-    key: 'ziwei',
-    name: '紫微',
-    en: 'Zi Wei',
-    desc: '14 主星 · 13 宫位 · AI 解读',
-    status: 'ready' as const,
-    when: '5 月',
-    icon: '◉',  // 实心圆+内点，紫微星视觉
-    note: '',
-  },
-  {
-    key: 'tianji',
-    name: '天纪',
-    en: 'Tian Ji',
-    desc: '紫微 · 周易 · 奇门遁甲',
-    status: 'soon' as const,
-    when: '6 月',
-    icon: '⊙',  // 圆+内点（古文"日"），与 ◉ 同字宽
-    note: '',
-  },
-  {
-    key: 'diji',
-    name: '地纪',
-    en: 'Di Ji',
-    desc: '倪师未竟之业 · 后辈补注',
-    status: 'soon' as const,
-    when: '6 月',
-    icon: '⊞',  // 方+井（地/田视觉），与 ⊙ 同字宽
-    note: '遗稿研读',
-  },
-  {
-    key: 'renji',
-    name: '人纪',
-    en: 'Ren Ji',
-    desc: '内经 · 伤寒 · 金匮 · 针灸',
-    status: 'soon' as const,
-    when: '7 月',
-    icon: '⊕',  // 圆+十字（医道/阴阳调和），与 ⊙/⊞ 同字宽
-    note: '',
-  },
+  { key: 'ziwei', status: 'ready' as const, icon: '◉' },  // 实心圆+内点，紫微星视觉
+  { key: 'tianji', status: 'soon' as const, icon: '⊙' },  // 圆+内点（古文"日"），与 ◉ 同字宽
+  { key: 'diji', status: 'soon' as const, icon: '⊞' },    // 方+井（地/田视觉），与 ⊙ 同字宽
+  { key: 'renji', status: 'soon' as const, icon: '⊕' },    // 圆+十字（医道/阴阳调和），与 ⊙/⊞ 同字宽
 ];
 
 // ─── 倪海厦核心教义 ──────────────────────────────────────
+// 每条教义的文案走字典：home.teaching.<key>.title / .body
 const NI_TEACHINGS = [
-  {
-    title: '命宫为本，三方为用',
-    body: '倪师始终强调，看命必先看命宫。命宫主星决定一个人的基本格局与天生性格，三方（财帛、官禄、迁移）则决定此人的「用武之地」。四宫联动才是完整的人生图景。',
-  },
-  {
-    title: '对宫借星，不可忽视',
-    body: '倪师的独到之处在于重视「对宫」。任何宫位若为空宫，必须借对宫星曜来论断，命宫的对面是迁移宫，两者互相影响，这是很多初学者容易忽略的关键。',
-  },
-  {
-    title: '四化才是命运的手',
-    body: '星曜只是基础，四化（化禄、化权、化科、化忌）才是决定运势好坏的关键。同一颗星，有化禄与有化忌，人生轨迹可以截然不同。倪师反复强调：不看四化，命盘只解了一半。',
-  },
-  {
-    title: '大限十年，运势有节',
-    body: '倪师将人生划分为12个大限，每个大限10年。他认为人在不同的大限宫位，际遇完全不同。了解自己现在走的是哪个大限、该宫位有何星曜，才能真正把握当下的运势。',
-  },
+  { key: 'life' },
+  { key: 'opposite' },
+  { key: 'sihua' },
+  { key: 'decade' },
 ];
 
 // ─── 主题色彩 helper ─────────────────────────────────────
@@ -249,34 +210,37 @@ function useColors(theme: Theme) {
   };
 }
 
-// ─── 四化简介数据 ─────────────────────────────────────────
-const SIHUA_BRIEF: Record<string, { attr: string; brief: string }> = {
-  '化禄': { attr: '吉化·增益', brief: '福星到宫，主财运与福气增益。所在宫位事物顺遂，能力增强，是命盘中最受欢迎的化星。' },
-  '化权': { attr: '吉化·权威', brief: '权力星到宫，主掌控与领导力。所在宫位主强势与决断，喜入官禄宫与命宫，主事业上的实权。' },
-  '化科': { attr: '吉化·名誉', brief: '科名星到宫，主声誉与贵人缘。所在宫位主文名与考运，有贵人扶持，宜学术、考试与公开场合。' },
-  '化忌': { attr: '凶化·阻碍', brief: '劫数星到宫，主执念与阻碍。所在宫位需特别关注，该宫人生课题将成为重要考验。' },
-};
-
-// ─── 主星简介数据 ─────────────────────────────────────────
-const STAR_BRIEF: Record<string, { attr: string; brief: string }> = {
-  '紫微': { attr: '土·帝王星', brief: '天皇贵星，统御众星。坐命者有孤傲之气，主权威显达，天生具备领导气质，适合独当一面的领导岗位。' },
-  '天机': { attr: '木·智慧星', brief: '益寿星，主智谋与变动。聪慧机灵，善于筹谋，心思细腻，宜从事策划、顾问、技术类工作。' },
-  '太阳': { attr: '火·官禄主', brief: '官禄主星，主声誉与名望。慷慨大度，重视公众形象，利官场与公职，男命力强，入庙时光明磊落。' },
-  '武曲': { attr: '金·财帛主', brief: '财帛主星，主财务与决断。意志坚定，行动果敢，适合财务、金融、军警类职业，孤克之星，利晚婚。' },
-  '天同': { attr: '水·福星', brief: '福德主星，主享乐与人缘。性情温和，人缘极好，注重生活品质，感情细腻，晚年运势佳。' },
-  '廉贞': { attr: '火·才艺星', brief: '次桃花星，主才艺与情欲。才华出众，感情丰富，适合艺术、政界，多才多艺但需防桃花是非。' },
-  '天府': { attr: '土·财库星', brief: '南斗主星，主财库与积蓄。稳重保守，理财能力强，是命盘的稳定力量，适合管理财务与行政。' },
-  '太阴': { attr: '水·田宅主', brief: '田宅主星，主财富与阴柔。细腻温柔，感受力强，女命尤佳，利不动产与积蓄，适合文艺或服务业。' },
-  '贪狼': { attr: '木水·桃花', brief: '桃花星，主欲望与才艺。多才多艺，欲望旺盛，社交活跃，宜从事艺术、公关、商业，人缘极好。' },
-  '巨门': { attr: '水·是非星', brief: '暗星，主口才与是非。口才出众，思辨能力强，适合律师、教育、媒体，注意口舌是非，以辩才立身。' },
-  '天相': { attr: '水·印星', brief: '印星，主辅佐与印绶。善于协调，重视礼节，正直守法，适合幕僚、行政、法律类工作，贵人运佳。' },
-  '天梁': { attr: '土·荫星', brief: '荫星，主老成与荫蔽。正直稳重，慈悲心强，老天爷会保佑，适合医疗、社会工作、宗教领域。' },
-  '七杀': { attr: '金火·将星', brief: '将星，主刚烈与开创。性格刚毅，行动力强，勇于挑战，适合创业、军警、竞争性行业，逢凶化吉。' },
-  '破军': { attr: '水·耗星', brief: '耗星，主变动与开拓。勇于突破，不惧改变，一生变动大但有魄力，适合开拓型工作，走别人没走过的路。' },
+// ─── 四化 / 主星 简介数据 ─────────────────────────────────
+/**
+ * 命理专有名词（十四主星 / 四化）一律保留中文显示，
+ * 但 attr（星性）与 brief（简介）走字典。
+ * 显式列出字典 key，编译期即可校验 key 是否存在。
+ */
+const STAR_BRIEF_KEYS: Record<string, { name: DictKey; attr: DictKey; brief: DictKey }> = {
+  '紫微': { name: 'home.star.ziwei', attr: 'home.star.ziwei.attr', brief: 'home.star.ziwei.brief' },
+  '天机': { name: 'home.star.tianji', attr: 'home.star.tianji.attr', brief: 'home.star.tianji.brief' },
+  '太阳': { name: 'home.star.taiyang', attr: 'home.star.taiyang.attr', brief: 'home.star.taiyang.brief' },
+  '武曲': { name: 'home.star.wuqu', attr: 'home.star.wuqu.attr', brief: 'home.star.wuqu.brief' },
+  '天同': { name: 'home.star.tiantong', attr: 'home.star.tiantong.attr', brief: 'home.star.tiantong.brief' },
+  '廉贞': { name: 'home.star.lianzhen', attr: 'home.star.lianzhen.attr', brief: 'home.star.lianzhen.brief' },
+  '天府': { name: 'home.star.tianfu', attr: 'home.star.tianfu.attr', brief: 'home.star.tianfu.brief' },
+  '太阴': { name: 'home.star.taiyin', attr: 'home.star.taiyin.attr', brief: 'home.star.taiyin.brief' },
+  '贪狼': { name: 'home.star.tanlang', attr: 'home.star.tanlang.attr', brief: 'home.star.tanlang.brief' },
+  '巨门': { name: 'home.star.jumen', attr: 'home.star.jumen.attr', brief: 'home.star.jumen.brief' },
+  '天相': { name: 'home.star.tianxiang', attr: 'home.star.tianxiang.attr', brief: 'home.star.tianxiang.brief' },
+  '天梁': { name: 'home.star.tianliang', attr: 'home.star.tianliang.attr', brief: 'home.star.tianliang.brief' },
+  '七杀': { name: 'home.star.qisha', attr: 'home.star.qisha.attr', brief: 'home.star.qisha.brief' },
+  '破军': { name: 'home.star.pojun', attr: 'home.star.pojun.attr', brief: 'home.star.pojun.brief' },
+  '化禄': { name: 'home.sihua.hualu', attr: 'home.sihua.hualu.attr', brief: 'home.sihua.hualu.brief' },
+  '化权': { name: 'home.sihua.huaquan', attr: 'home.sihua.huaquan.attr', brief: 'home.sihua.huaquan.brief' },
+  '化科': { name: 'home.sihua.huake', attr: 'home.sihua.huake.attr', brief: 'home.sihua.huake.brief' },
+  '化忌': { name: 'home.sihua.huaji', attr: 'home.sihua.huaji.attr', brief: 'home.sihua.huaji.brief' },
 };
 
 // ─── 功能视觉装饰 ────────────────────────────────────────
 function FeatureVisual({ index, colors: c }: { index: number; colors: ReturnType<typeof useColors> }) {
+  const { t } = useI18n();
+
   if (index === 0) {
     return (
       <div className="flex flex-col items-center justify-center h-full gap-5">
@@ -301,19 +265,23 @@ function FeatureVisual({ index, colors: c }: { index: number; colors: ReturnType
           })}
         </div>
         <p className="text-[10px] tracking-widest transition-colors duration-300"
-          style={{ color: c.textFaint }}>倪海厦排盘法</p>
+          style={{ color: c.textFaint }}>{t('home.visual.system.caption')}</p>
       </div>
     );
   }
 
   if (index === 1) {
     const [sel, setSel] = useState<string | null>(null);
-    const selInfo = sel ? (STAR_BRIEF[sel] ?? SIHUA_BRIEF[sel] ?? null) : null;
+    // 命理专有名词保留中文显示；attr / brief 走字典
+    const selKeys = sel ? STAR_BRIEF_KEYS[sel] : null;
+    const selInfo = selKeys
+      ? { attr: t(selKeys.attr), brief: t(selKeys.brief) }
+      : null;
     return (
       <div className="flex flex-col gap-4 h-full justify-center">
         {[
-          { group: '紫微系', stars: ['紫微', '天机', '太阳', '武曲', '天同', '廉贞'] },
-          { group: '天府系', stars: ['天府', '太阴', '贪狼', '巨门', '天相', '天梁', '七杀', '破军'] },
+          { group: t('home.visual.stars.group1'), stars: ['紫微', '天机', '太阳', '武曲', '天同', '廉贞'] },
+          { group: t('home.visual.stars.group2'), stars: ['天府', '太阴', '贪狼', '巨门', '天相', '天梁', '七杀', '破军'] },
         ].map(group => (
           <div key={group.group}>
             <div className="text-[11px] tracking-widest mb-2 transition-colors duration-300"
@@ -331,7 +299,7 @@ function FeatureVisual({ index, colors: c }: { index: number; colors: ReturnType
                     background: sel === s ? `${c.goldLine}30` : 'transparent',
                     fontWeight: sel === s ? 600 : 400,
                   }}>
-                  {s}
+                  {t(STAR_BRIEF_KEYS[s].name)}
                 </motion.button>
               ))}
             </div>
@@ -339,7 +307,7 @@ function FeatureVisual({ index, colors: c }: { index: number; colors: ReturnType
         ))}
         <div>
           <div className="text-[11px] tracking-widest mb-2 transition-colors duration-300"
-            style={{ color: c.textFaint }}>四化飞星</div>
+            style={{ color: c.textFaint }}>{t('home.visual.sihua.label')}</div>
           <div className="flex gap-2 flex-wrap">
             {[['化禄', 'rgba(52,211,153,0.7)'], ['化权', 'rgba(96,165,250,0.7)'], ['化科', 'rgba(250,204,21,0.7)'], ['化忌', 'rgba(248,113,113,0.7)']].map(([label, color]) => (
               <motion.button key={label}
@@ -353,7 +321,7 @@ function FeatureVisual({ index, colors: c }: { index: number; colors: ReturnType
                   background: sel === label ? `${color.replace('0.7', '0.15')}` : 'transparent',
                   fontWeight: sel === label ? 600 : 400,
                 }}>
-                {label}
+                {t(STAR_BRIEF_KEYS[label].name)}
               </motion.button>
             ))}
           </div>
@@ -366,7 +334,7 @@ function FeatureVisual({ index, colors: c }: { index: number; colors: ReturnType
               className="rounded-xl p-4 mt-1.5"
               style={{ border: `1px solid ${c.goldLine}`, background: c.featureBg }}>
               <div className="flex items-center gap-2 mb-1.5">
-                <span className="text-sm font-semibold" style={{ color: c.goldSolid }}>{sel}</span>
+                <span className="text-sm font-semibold" style={{ color: c.goldSolid }}>{t(STAR_BRIEF_KEYS[sel!].name)}</span>
                 <span className="text-[11px] px-2 py-0.5 rounded-full" style={{ color: c.tagText, border: `1px solid ${c.goldLine}` }}>{selInfo.attr}</span>
               </div>
               <p className="text-xs leading-relaxed" style={{ color: c.textSecond }}>{selInfo.brief}</p>
@@ -379,9 +347,9 @@ function FeatureVisual({ index, colors: c }: { index: number; colors: ReturnType
 
   if (index === 2) {
     const msgs = [
-      { role: 'user', text: '我今年的事业运势如何？' },
-      { role: 'ai', text: '命宫天机化禄，今年大限走官禄宫，三方有左辅相助，事业有贵人提携，适合主动拓展…' },
-      { role: 'user', text: '什么时候感情运最好？' },
+      { role: 'user', text: t('home.visual.chat.q1') },
+      { role: 'ai', text: t('home.visual.chat.a1') },
+      { role: 'user', text: t('home.visual.chat.q2') },
     ];
     return (
       <div className="flex flex-col gap-2 h-full justify-center">
@@ -407,9 +375,9 @@ function FeatureVisual({ index, colors: c }: { index: number; colors: ReturnType
 
   if (index === 3) {
     const patterns = [
-      { name: '杀破狼格', desc: '开创进取之命', ok: true },
-      { name: '廉相格',   desc: '行政印绶之格', ok: true },
-      { name: '化忌入命', desc: '需关注心理课题', ok: false },
+      { name: t('home.visual.patterns.shaPoLang.name'), desc: t('home.visual.patterns.shaPoLang.desc'), ok: true },
+      { name: t('home.visual.patterns.lianXiang.name'), desc: t('home.visual.patterns.lianXiang.desc'), ok: true },
+      { name: t('home.visual.patterns.huaJiInLife.name'), desc: t('home.visual.patterns.huaJiInLife.desc'), ok: false },
     ];
     return (
       <div className="flex flex-col gap-3 h-full justify-center">
@@ -432,7 +400,7 @@ function FeatureVisual({ index, colors: c }: { index: number; colors: ReturnType
           </motion.div>
         ))}
         <div className="text-[9px] mt-2 tracking-wider text-center" style={{ color: c.textFaint }}>
-          自动识别 11 种经典格局
+          {t('home.visual.patterns.count')}
         </div>
       </div>
     );
@@ -445,7 +413,16 @@ function FeatureVisual({ index, colors: c }: { index: number; colors: ReturnType
 export default function HomePage() {
   const router = useRouter();
   const { theme } = useTheme();
+  const { t } = useI18n();
   const c = useColors(theme);
+
+  // 功能模块文案在组件内读取（常量里只有字典 key 前缀）
+  const features = FEATURE_DEFS.map((def) => ({
+    tag: t(`${def.key}.tag` as DictKey),
+    title: t(`${def.key}.title` as DictKey),
+    subtitle: t(`${def.key}.subtitle` as DictKey),
+    points: Array.from({ length: def.points }, (_, i) => t(`${def.key}.p${i + 1}` as DictKey)),
+  }));
 
   const heroRef = useRef(null);
   const { scrollYProgress } = useScroll({ target: heroRef, offset: ['start start', 'end start'] });
@@ -487,7 +464,7 @@ export default function HomePage() {
         }}>
         <div className="text-[11px] sm:text-xs tracking-[0.3em] sm:tracking-[0.4em] font-medium transition-colors duration-300 flex-shrink-0"
           style={{ color: c.goldSolid }}>
-          紫微命盘
+          {t('home.nav.brand')}
         </div>
         <div className="flex items-center gap-1.5 sm:gap-3 flex-shrink-0">
           <LocaleSwitcher />
@@ -497,14 +474,14 @@ export default function HomePage() {
             onClick={() => router.push('/heming')}
             className="text-[11px] sm:text-xs px-2.5 sm:px-4 py-1 sm:py-1.5 rounded-full transition-all duration-300"
             style={{ border: `1px solid ${c.navBorder}`, color: c.textMuted }}>
-            合盘
+            {t('home.nav.heming')}
           </motion.button>
           <motion.button
             whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.97 }}
             onClick={() => router.push('/chart')}
             className="text-[11px] sm:text-xs px-2.5 sm:px-4 py-1 sm:py-1.5 rounded-full transition-all duration-300"
             style={{ border: `1px solid ${c.goldLine}`, color: c.goldSolid }}>
-            立即起盘
+            {t('home.nav.start')}
           </motion.button>
         </div>
       </nav>
@@ -518,7 +495,7 @@ export default function HomePage() {
             className="flex items-center justify-center gap-3 mb-8">
             <div className="h-px w-12" style={{ background: `linear-gradient(to right, transparent, ${c.goldLine})` }} />
             <span className="text-[11px] tracking-[0.45em] transition-colors duration-300" style={{ color: c.tagText }}>
-              紫微斗数 · 倪海厦体系
+              {t('home.hero.eyebrow')}
             </span>
             <div className="h-px w-12" style={{ background: `linear-gradient(to left, transparent, ${c.goldLine})` }} />
           </motion.div>
@@ -533,7 +510,7 @@ export default function HomePage() {
                 fontSize: 'clamp(56px, 10vw, 124px)',
                 letterSpacing: '0.07em',
               }}>
-              紫微命盘
+              {t('home.hero.title')}
             </h1>
           </motion.div>
 
@@ -541,19 +518,19 @@ export default function HomePage() {
             transition={{ duration: 0.7, delay: 0.45 }}
             className="text-base md:text-lg tracking-[0.18em] mb-2"
             style={{ color: c.textSecond, fontWeight: 500 }}>
-            紫微为门 · 天地人为路 · 倪海厦为师
+            {t('home.hero.subtitle')}
           </motion.p>
           <motion.p initial={{ opacity: 0 }} animate={{ opacity: 1 }}
             transition={{ duration: 0.7, delay: 0.55 }}
             className="text-xs md:text-sm tracking-[0.3em] mb-6"
             style={{ color: c.textMuted, opacity: 0.85 }}>
-            AI 答疑 · 知行合一
+            {t('home.hero.tagline')}
           </motion.p>
           <motion.p initial={{ opacity: 0 }} animate={{ opacity: 1 }}
             transition={{ duration: 0.7, delay: 0.65 }}
             className="text-sm max-w-xl mx-auto leading-relaxed mb-10"
             style={{ color: c.textMuted }}>
-            输入出生年月日时，生成专属紫微斗数命盘 — 后续天纪、地纪、人纪学习模块陆续开放。
+            {t('home.hero.desc')}
           </motion.p>
 
           {/* CTA */}
@@ -565,7 +542,7 @@ export default function HomePage() {
               onClick={() => router.push('/chart')}
               className="px-12 py-4 font-semibold text-base tracking-widest rounded-full"
               style={{ background: c.ctaBg, color: c.ctaText }}>
-              立即起盘
+              {t('home.hero.cta')}
             </motion.button>
           </motion.div>
 
@@ -579,7 +556,9 @@ export default function HomePage() {
                 transition={{ delay: 1.05 + i * 0.03, duration: 0.35 }}
                 className="flex items-center justify-center px-2 py-1 rounded-full"
                 style={{ background: c.starBg, border: `1px solid ${c.starBorder}` }}>
-                <span className="text-[11px] tracking-wide" style={{ color: c.starText }}>{star.name}</span>
+                <span className="text-[11px] tracking-wide" style={{ color: c.starText }}>
+                  {t(STAR_BRIEF_KEYS[star.name].name)}
+                </span>
               </motion.div>
             ))}
           </motion.div>
@@ -608,11 +587,11 @@ export default function HomePage() {
             <div style={{ fontSize: '20px', marginBottom: '6px', lineHeight: 1 }}>🎁</div>
             <div style={{ fontSize: '13px', lineHeight: 1.7, color: '#8b3a1a', fontWeight: 500 }}>
               <span style={{ color: '#c45a2d', fontWeight: 700, fontSize: '14px' }}>5/1 — 5/8</span>
-              <span> 限时回馈</span>
+              <span> {t('home.promo.limited')}</span>
             </div>
             <div style={{ fontSize: '13px', lineHeight: 1.7, color: '#8b3a1a', fontWeight: 500 }}>
-              全部功能 + AI 提问
-              <strong style={{ color: '#c45a2d' }}> 全免费</strong>
+              {t('home.promo.freeAll')}
+              <strong style={{ color: '#c45a2d' }}> {t('home.promo.freeBold')}</strong>
             </div>
           </div>
         </motion.div>
@@ -639,10 +618,10 @@ export default function HomePage() {
             <div style={{ fontSize: '18px', marginBottom: '4px', lineHeight: 1 }}>🎁</div>
             <div style={{ fontSize: '12px', lineHeight: 1.7, color: '#8b3a1a', fontWeight: 500 }}>
               <span style={{ color: '#c45a2d', fontWeight: 700, fontSize: '13px' }}>5/1 — 5/8</span>
-              <span> 限时回馈</span>
+              <span> {t('home.promo.limited')}</span>
             </div>
             <div style={{ fontSize: '12px', lineHeight: 1.7, color: '#8b3a1a', fontWeight: 500 }}>
-              全部功能 + AI <strong style={{ color: '#c45a2d' }}>全免费</strong>
+              {t('home.promo.freeShort')} <strong style={{ color: '#c45a2d' }}>{t('home.promo.freeBold')}</strong>
             </div>
           </div>
         </motion.div>
@@ -651,7 +630,7 @@ export default function HomePage() {
         <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }}
           transition={{ delay: 2, duration: 1 }}
           className="absolute bottom-6 left-0 right-0 flex flex-col items-center gap-2 pointer-events-none">
-          <span className="text-[9px] tracking-[0.4em] uppercase" style={{ color: c.scrollText }}>探索更多</span>
+          <span className="text-[9px] tracking-[0.4em] uppercase" style={{ color: c.scrollText }}>{t('home.hero.scroll')}</span>
           <motion.div animate={{ y: [0, 6, 0] }} transition={{ repeat: Infinity, duration: 2, ease: 'easeInOut' }}
             className="w-px h-8" style={{ background: `linear-gradient(to bottom, ${c.scrollLine}, transparent)` }} />
         </motion.div>
@@ -673,14 +652,14 @@ export default function HomePage() {
         <FadeIn className="relative mx-auto text-center w-full" y={20}>
           <div className="flex items-center justify-center gap-4 mb-8">
             <div className="h-px w-16" style={{ background: 'linear-gradient(to right, transparent, rgba(212,168,67,0.45))' }} />
-            <span className="text-[10px] tracking-[0.55em] uppercase" style={{ color: 'rgba(212,168,67,0.5)' }}>命 · 运 · 观</span>
+            <span className="text-[10px] tracking-[0.55em] uppercase" style={{ color: 'rgba(212,168,67,0.5)' }}>{t('home.philosophy.eyebrow')}</span>
             <div className="h-px w-16" style={{ background: 'linear-gradient(to left, transparent, rgba(212,168,67,0.45))' }} />
           </div>
           <div className="space-y-3" style={{ maxWidth: '840px', margin: '0 auto' }}>
             {[
-              { text: '提前窥探命运的意义', size: 'clamp(17px, 2.2vw, 28px)', color: 'rgba(215,228,252,0.72)', delay: 0.1 },
-              { text: '不在于预知未来', size: 'clamp(21px, 2.6vw, 32px)', color: 'rgba(220,232,250,0.74)', delay: 0.25 },
-              { text: '而在于不断认识自己', size: 'clamp(24px, 3vw, 40px)', color: 'rgba(218,230,248,0.8)', delay: 0.34 },
+              { text: t('home.philosophy.line1'), size: 'clamp(17px, 2.2vw, 28px)', color: 'rgba(215,228,252,0.72)', delay: 0.1 },
+              { text: t('home.philosophy.line2'), size: 'clamp(21px, 2.6vw, 32px)', color: 'rgba(220,232,250,0.74)', delay: 0.25 },
+              { text: t('home.philosophy.line3'), size: 'clamp(24px, 3vw, 40px)', color: 'rgba(218,230,248,0.8)', delay: 0.34 },
             ].map((line, i) => (
               <motion.p key={i}
                 initial={{ opacity: 0, y: 16 }} whileInView={{ opacity: 1, y: 0 }}
@@ -694,7 +673,7 @@ export default function HomePage() {
               transition={{ duration: 0.8, delay: 0.45 }}
               className={`grad-text ${theme === 'dark' ? 'grad-text-dark' : 'grad-text-light'} font-bold`}
               style={{ fontSize: 'clamp(24px, 3.4vw, 48px)', letterSpacing: '0.05em', lineHeight: 1.35 }}>
-              最终书写属于自己的人生剧本
+              {t('home.philosophy.final')}
             </motion.p>
           </div>
         </FadeIn>
@@ -710,14 +689,14 @@ export default function HomePage() {
         <FadeIn className="text-center mb-14">
           <div className="flex items-center justify-center gap-3 mb-3">
             <div className="h-px w-12" style={{ background: `linear-gradient(to right, transparent, ${c.goldLine})` }} />
-            <span className="text-[10px] tracking-[0.4em] uppercase" style={{ color: c.goldSolid, opacity: 0.7 }}>Curriculum</span>
+            <span className="text-[10px] tracking-[0.4em] uppercase" style={{ color: c.goldSolid, opacity: 0.7 }}>{t('home.curriculum.eyebrow')}</span>
             <div className="h-px w-12" style={{ background: `linear-gradient(to left, transparent, ${c.goldLine})` }} />
           </div>
           <div className="text-2xl lg:text-3xl font-bold mb-2 tracking-[0.15em]" style={{ color: c.textPrimary }}>
-            倪师方法论 · 渐次展开
+            {t('home.curriculum.title')}
           </div>
           <div className="text-xs lg:text-sm tracking-[0.1em]" style={{ color: c.textMuted }}>
-            从紫微入门，逐步开放天纪 / 地纪 / 人纪学习模块
+            {t('home.curriculum.desc')}
           </div>
         </FadeIn>
 
@@ -769,13 +748,13 @@ export default function HomePage() {
                     <div className="flex items-baseline gap-2 lg:flex-col lg:gap-0 lg:mb-1">
                       <div className="text-[10px] tracking-[0.25em] lg:mb-1.5"
                         style={{ color: ready ? '#10b981' : c.textMuted, fontWeight: 500 }}>
-                        {s.when}
+                        {t(`home.section.${s.key}.when` as DictKey)}
                       </div>
                       <div className="text-base lg:text-xl font-semibold tracking-[0.15em]"
                         style={{ color: c.textPrimary }}>
-                        {s.name}
+                        {t(`home.section.${s.key}.name` as DictKey)}
                       </div>
-                      {s.note && (
+                      {t(`home.section.${s.key}.note` as DictKey) && (
                         <div className="text-[9px] tracking-[0.15em] px-2 py-0.5 rounded-full lg:hidden"
                           style={{
                             color: c.goldSolid,
@@ -783,12 +762,12 @@ export default function HomePage() {
                             border: `1px solid ${c.goldLine}`,
                             opacity: 0.85,
                           }}>
-                          {s.note}
+                          {t(`home.section.${s.key}.note` as DictKey)}
                         </div>
                       )}
                     </div>
                     {/* 桌面专属 note（手机已在顶行 inline 展示）*/}
-                    {s.note && (
+                    {t(`home.section.${s.key}.note` as DictKey) && (
                       <div className="hidden lg:block text-[9px] tracking-[0.15em] mb-1.5 px-2 py-0.5 rounded-full"
                         style={{
                           color: c.goldSolid,
@@ -796,13 +775,13 @@ export default function HomePage() {
                           border: `1px solid ${c.goldLine}`,
                           opacity: 0.85,
                         }}>
-                        {s.note}
+                        {t(`home.section.${s.key}.note` as DictKey)}
                       </div>
                     )}
                     {/* 简介 */}
                     <div className="text-[11px] lg:text-xs leading-relaxed lg:max-w-[200px] mt-0.5 lg:mt-0"
                       style={{ color: c.textSecond }}>
-                      {s.desc}
+                      {t(`home.section.${s.key}.desc` as DictKey)}
                     </div>
                   </div>
                 </motion.div>
@@ -814,7 +793,7 @@ export default function HomePage() {
 
       {/* ══ 功能详解 ══════════════════════════════════════ */}
       <section className="relative z-10">
-        {FEATURES.map((feature, i) => (
+        {features.map((feature, i) => (
           <div key={i}
             className={`flex items-center px-6 md:px-10 lg:px-14 py-20 md:py-24 ${i <= 2 ? 'min-h-[82svh] lg:min-h-[92vh]' : ''}`}
             style={{ background: i % 2 === 1 ? c.altSection : 'transparent' }}>
@@ -880,24 +859,23 @@ export default function HomePage() {
             <div className="text-center mb-10">
               <div className="flex items-center justify-center gap-3 mb-6">
                 <div className="h-px w-12" style={{ background: `linear-gradient(to right, transparent, ${c.goldLine})` }} />
-                <span className="text-[10px] tracking-[0.5em] uppercase" style={{ color: c.tagText }}>Ni Haixia · Philosophy</span>
+                <span className="text-[10px] tracking-[0.5em] uppercase" style={{ color: c.tagText }}>{t('home.tdp.eyebrow')}</span>
                 <div className="h-px w-12" style={{ background: `linear-gradient(to left, transparent, ${c.goldLine})` }} />
               </div>
               <h2 className={`grad-text ${theme === 'dark' ? 'grad-text-dark' : 'grad-text-light'} font-bold mb-5 tracking-tight`}
                 style={{ fontSize: 'clamp(32px, 4vw, 48px)' }}>
-                天 · 地 · 人
+                {t('home.tdp.title')}
               </h2>
               <p className="max-w-2xl mx-auto text-sm leading-relaxed" style={{ color: c.textSecond }}>
-                倪海厦老师的核心命运观：命运从来不是人生的全部。<br />
-                他将影响人生的力量分为三个同等重要的维度。
+                {t('home.tdp.lead')}
               </p>
             </div>
           </FadeIn>
           <div className="grid grid-cols-1 md:grid-cols-3 gap-3 md:gap-4">
             {[
-              { glyph: '天', label: '先天命运', pct: '⅓', color: c.goldSolid, borderColor: c.goldLine, desc: '紫微斗数所揭示的，是一个人的先天命盘格局——出生时间决定的星曜布局、五行局数、命宫主星。这只是命运的三分之一，是人生的底色，而非全貌。', sub: '命盘 · 星曜 · 五行' },
-              { glyph: '地', label: '地理环境', pct: '⅓', color: 'rgba(96,165,250,0.9)', borderColor: 'rgba(96,165,250,0.3)', desc: '你所在的地理环境、城市、国家、风水格局，乃至家庭背景与社会结构，共同构成了命运的第二个维度。同一命盘，生在不同地方，际遇可以天壤之别。', sub: '地域 · 风水 · 环境' },
-              { glyph: '人', label: '人心意念', pct: '⅓', color: 'rgba(100,216,139,0.9)', borderColor: 'rgba(100,216,139,0.3)', desc: '个人的意志、心态、选择与行动，才是改变命运最主动的力量。倪师强调：了解命盘是为了更好地做人，而不是坐等命运安排。精进自己，是最强的破局之道。', sub: '意志 · 选择 · 行动' },
+              { glyph: t('home.tdp.tian.glyph'), label: t('home.tdp.tian.label'), pct: '⅓', color: c.goldSolid, borderColor: c.goldLine, desc: t('home.tdp.tian.desc'), sub: t('home.tdp.tian.sub') },
+              { glyph: t('home.tdp.di.glyph'), label: t('home.tdp.di.label'), pct: '⅓', color: 'rgba(96,165,250,0.9)', borderColor: 'rgba(96,165,250,0.3)', desc: t('home.tdp.di.desc'), sub: t('home.tdp.di.sub') },
+              { glyph: t('home.tdp.ren.glyph'), label: t('home.tdp.ren.label'), pct: '⅓', color: 'rgba(100,216,139,0.9)', borderColor: 'rgba(100,216,139,0.3)', desc: t('home.tdp.ren.desc'), sub: t('home.tdp.ren.sub') },
             ].map((item, i) => (
               <FadeIn key={item.glyph} delay={0.1 + i * 0.12}>
                 <motion.div whileHover={{ y: -4 }} transition={{ duration: 0.1 }}
@@ -907,7 +885,7 @@ export default function HomePage() {
                     <div className="text-5xl font-bold leading-none" style={{ color: item.color }}>{item.glyph}</div>
                     <div className="text-right">
                       <div className="text-2xl font-bold" style={{ color: item.color }}>{item.pct}</div>
-                      <div className="text-[9px] mt-0.5 tracking-widest" style={{ color: c.textMuted }}>of life</div>
+                      <div className="text-[9px] mt-0.5 tracking-widest" style={{ color: c.textMuted }}>{t('home.tdp.ofLife')}</div>
                     </div>
                   </div>
                   <div className="mb-3">
@@ -923,9 +901,9 @@ export default function HomePage() {
           <FadeIn delay={0.3}>
             <div className="mt-10 text-center">
               <p className="text-sm leading-relaxed" style={{ color: c.textSecond }}>
-                「命运不是人生的全部，加上地理位置和人念，才是。」
+                {t('home.tdp.quote')}
               </p>
-              <p className="mt-2 text-[10px] tracking-widest" style={{ color: c.tagText }}>— 倪海厦</p>
+              <p className="mt-2 text-[10px] tracking-widest" style={{ color: c.tagText }}>{t('home.tdp.quoteBy')}</p>
             </div>
           </FadeIn>
         </div>
@@ -939,16 +917,16 @@ export default function HomePage() {
             <div className="text-center mb-10">
               <div className="flex items-center justify-center gap-3 mb-6">
                 <div className="h-px w-12" style={{ background: `linear-gradient(to right, transparent, ${c.goldLine})` }} />
-                <span className="text-[10px] tracking-[0.5em] uppercase" style={{ color: c.tagText }}>Master · 1953 – 2012</span>
+                <span className="text-[10px] tracking-[0.5em] uppercase" style={{ color: c.tagText }}>{t('home.master.eyebrow')}</span>
                 <div className="h-px w-12" style={{ background: `linear-gradient(to left, transparent, ${c.goldLine})` }} />
               </div>
               <h2 className={`grad-text ${theme === 'dark' ? 'grad-text-dark' : 'grad-text-light'} font-bold mb-6 tracking-tight`}
                 style={{ fontSize: 'clamp(32px, 4vw, 48px)' }}>
-                倪海厦老师
+                {t('home.master.title')}
               </h2>
               <p className="max-w-2xl mx-auto leading-relaxed text-sm" style={{ color: c.textSecond }}>
-                当代华人圈最具影响力的中医与术数大家之一<br />
-                美国汉唐中医学院创办人 ·「人纪」「天纪」两大教学体系传世
+                {t('home.master.lead1')}<br />
+                {t('home.master.lead2')}
               </p>
             </div>
           </FadeIn>
@@ -958,9 +936,9 @@ export default function HomePage() {
               style={{ border: `1px solid ${c.niBorder}`, background: c.niBg, boxShadow: c.cardShadow }}>
               <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-8">
                 {[
-                  { label: '生于', value: '1954年', sub: '台湾' },
-                  { label: '离世', value: '2012年', sub: '1月31日 · 享年58' },
-                  { label: '传承', value: '紫微斗数', sub: '经方中医 · 易经' },
+                  { label: t('home.master.fact.born.label'), value: t('home.master.fact.born.value'), sub: t('home.master.fact.born.sub') },
+                  { label: t('home.master.fact.died.label'), value: t('home.master.fact.died.value'), sub: t('home.master.fact.died.sub') },
+                  { label: t('home.master.fact.legacy.label'), value: t('home.master.fact.legacy.value'), sub: t('home.master.fact.legacy.sub') },
                 ].map(item => (
                   <div key={item.label} className="text-center rounded-xl px-4 py-3"
                     style={{ border: `1px solid ${c.niDivider}`, background: 'rgba(255,255,255,0.02)' }}>
@@ -973,38 +951,27 @@ export default function HomePage() {
               <div className="h-px mb-8" style={{ background: c.niDivider }} />
               <div className="space-y-4 text-sm leading-relaxed max-w-3xl mx-auto" style={{ color: c.textSecond }}>
                 <p>
-                  <strong style={{ color: c.goldSolid }}>生平履历</strong>：
-                  倪海厦先生（1954–2012）出生于台湾，早年师承多位中医名家，专研经方派（《伤寒论》传承）。
-                  中年赴美行医，在美国创立<strong>汉唐中医学院</strong>，二十余年间系统传授中医与传统术数。
-                  2012 年 1 月 31 日因肝癌在台湾离世，享年 58 岁。
+                  <strong style={{ color: c.goldSolid }}>{t('home.master.bio.life.label')}</strong>
+                  <RichText text={t('home.master.bio.life.text')} strongColor={c.goldSolid} />
                 </p>
                 <p>
-                  <strong style={{ color: c.goldSolid }}>教学体系</strong>：
-                  倪师将毕生所学整理为两大公开教学系列。
-                  <strong>「人纪」</strong>涵盖《针灸大成》《神农本草经》《黄帝内经》《伤寒论》《金匮要略》——
-                  这是「人之纪」，奠定中医学习的完整路径；
-                  <strong>「天纪」</strong>涵盖紫微斗数与《易经》——这是「天之纪」，是术数研究的体系化成果。
-                  两者相合，是倪师留给后世最完整的传承。
+                  <strong style={{ color: c.goldSolid }}>{t('home.master.bio.teaching.label')}</strong>
+                  <RichText text={t('home.master.bio.teaching.text')} strongColor={c.goldSolid} />
                 </p>
                 <p>
-                  <strong style={{ color: c.goldSolid }}>紫微立场</strong>：
-                  倪师在紫微斗数上明确属<strong>南派三合派</strong>，主张「以命宫为本、以三方四正为用、以四化为纲」。
-                  他在《天纪》课程中明言：「<em>飞星（四化）飞来飞去太复杂，不搞这个，毕竟大道至简</em>」——
-                  这一立场将其与繁琐的飞星派清晰区分。
+                  <strong style={{ color: c.goldSolid }}>{t('home.master.bio.ziwei.label')}</strong>
+                  <RichText text={t('home.master.bio.ziwei.text')} strongColor={c.goldSolid} />
                 </p>
                 <p>
-                  <strong style={{ color: c.goldSolid }}>治学态度</strong>：
-                  倪师反对死记硬背口诀，强调「理解原理胜过背诵」「逻辑可复核胜过神秘玄学」。
-                  这种态度让紫微斗数从师徒密传的封闭体系，走向系统化、可验证、可学习的现代知识体系。
+                  <strong style={{ color: c.goldSolid }}>{t('home.master.bio.method.label')}</strong>
+                  <RichText text={t('home.master.bio.method.text')} strongColor={c.goldSolid} />
                 </p>
                 <p>
-                  <strong style={{ color: c.goldSolid }}>当代影响</strong>：
-                  倪师的讲课视频在 B 站、YouTube 与各大平台广泛流传，是新一代命理与中医爱好者公认的入门必修。
-                  他不仅是紫微斗数的传承者，更是把传统命理与中医带入现代知识体系的关键人物之一。
+                  <strong style={{ color: c.goldSolid }}>{t('home.master.bio.influence.label')}</strong>
+                  <RichText text={t('home.master.bio.influence.text')} strongColor={c.goldSolid} />
                 </p>
                 <p style={{ fontSize: '11px', color: c.textMuted, fontStyle: 'italic', marginTop: '12px' }}>
-                  本平台所有解读基于倪师《天纪》公开教学讲义、《紫微斗数全书》明版、传统三合派古籍整理而成，
-                  仅作文化与个人成长参考。倪师本人与本平台无任何商业关联。
+                  <RichText text={t('home.master.bio.disclaimer')} />
                 </p>
               </div>
             </div>
@@ -1021,9 +988,9 @@ export default function HomePage() {
                       style={{ borderColor: c.goldLine }}>
                       <span className="text-[9px]" style={{ color: c.goldSolid }}>{i + 1}</span>
                     </div>
-                    <h3 className="text-sm font-medium leading-relaxed" style={{ color: c.goldSolid }}>{teaching.title}</h3>
+                    <h3 className="text-sm font-medium leading-relaxed" style={{ color: c.goldSolid }}>{t(`home.teaching.${teaching.key}.title` as DictKey)}</h3>
                   </div>
-                  <p className="text-xs leading-relaxed pl-8" style={{ color: c.textSecond }}>{teaching.body}</p>
+                  <p className="text-xs leading-relaxed pl-8" style={{ color: c.textSecond }}>{t(`home.teaching.${teaching.key}.body` as DictKey)}</p>
                 </motion.div>
               </FadeIn>
             ))}
@@ -1048,14 +1015,14 @@ export default function HomePage() {
               </div>
               <h2 className={`grad-text ${theme === 'dark' ? 'grad-text-dark' : 'grad-text-light'} font-bold mb-4 tracking-tight`}
                 style={{ fontSize: 'clamp(26px, 3.5vw, 40px)' }}>
-                紫微合盘
+                {t('home.heming.title')}
               </h2>
               <p className="text-sm leading-relaxed mb-8 max-w-lg mx-auto" style={{ color: c.textSecond }}>
-                输入两个人的出生信息，AI 基于倪海厦体系分析夫妻宫互参、命宫兼容性与三方四正交互，<br className="hidden md:block" />
-                给出感情匹配度、合伙可行性与最佳相处建议。
+                {t('home.heming.desc1')}<br className="hidden md:block" />
+                {t('home.heming.desc2')}
               </p>
               <div className="flex justify-center gap-3 flex-wrap mb-6">
-                {['感情匹配度分析', '合伙创业评估', '亲子缘分解读', '婚前相性评估'].map(item => (
+                {[t('home.heming.tag1'), t('home.heming.tag2'), t('home.heming.tag3'), t('home.heming.tag4')].map(item => (
                   <span key={item} style={{
                     fontSize: '12px', padding: '5px 14px', borderRadius: '20px',
                     background: theme === 'dark' ? 'rgba(212,168,67,0.08)' : 'rgba(212,168,67,0.12)',
@@ -1076,7 +1043,7 @@ export default function HomePage() {
                   color: c.goldSolid,
                   cursor: 'pointer',
                 }}>
-                开始合盘分析
+                {t('home.heming.cta')}
               </motion.button>
             </FadeIn>
           </div>
@@ -1086,21 +1053,21 @@ export default function HomePage() {
       {/* ══ 最终 CTA ══════════════════════════════════════ */}
       <section className="relative z-10 py-40 px-6 text-center" style={{ background: c.altSection }}>
         <FadeIn>
-          <p className="text-[10px] tracking-[0.6em] uppercase mb-6" style={{ color: c.tagText }}>开始你的命盘之旅</p>
+          <p className="text-[10px] tracking-[0.6em] uppercase mb-6" style={{ color: c.tagText }}>{t('home.cta.eyebrow')}</p>
           <h2 className={`grad-text ${theme === 'dark' ? 'grad-text-dark' : 'grad-text-light'} font-bold mb-8 tracking-tight leading-tight`}
             style={{ fontSize: 'clamp(32px, 5vw, 60px)' }}>
-            你的紫微命盘<br />等你解读
+            <Multiline text={t('home.cta.title')} />
           </h2>
           <p className="text-sm mb-10 max-w-md mx-auto leading-relaxed" style={{ color: c.textSecond }}>
-            输入出生年月日时，在几秒内生成你的专属命盘<br />
-            再由 AI 按倪海厦体系为你深度解读
+            {t('home.cta.desc1')}<br />
+            {t('home.cta.desc2')}
           </p>
           <motion.button
             whileHover={{ scale: 1.03 }} whileTap={{ scale: 0.97 }}
             onClick={() => router.push('/chart')}
             className="px-14 py-4 font-semibold text-base tracking-widest rounded-full"
             style={{ background: c.ctaBg, color: c.ctaText }}>
-            免费起盘
+            {t('home.cta.button')}
           </motion.button>
           <div className="mt-4 flex flex-wrap gap-3 justify-center">
             <motion.a
@@ -1113,7 +1080,7 @@ export default function HomePage() {
                 background: 'transparent',
                 textDecoration: 'none',
               }}>
-              ✦ 紫微斗数知识库 →
+              {t('home.cta.knowledge')}
             </motion.a>
             <motion.a
               href="/library"
@@ -1125,7 +1092,7 @@ export default function HomePage() {
                 background: 'transparent',
                 textDecoration: 'none',
               }}>
-              📜 古籍原典库 →
+              {t('home.cta.library')}
             </motion.a>
           </div>
         </FadeIn>
@@ -1139,7 +1106,7 @@ export default function HomePage() {
         <div className="max-w-4xl mx-auto mb-8">
           <div className="text-[9px] tracking-[0.3em] text-center mb-4 uppercase"
             style={{ color: c.textMuted, opacity: 0.6 }}>
-            倪师方法论 · 学术体系
+            {t('home.footer.methodology')}
           </div>
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 sm:gap-4">
             {SECTIONS.map(s => {
@@ -1160,11 +1127,11 @@ export default function HomePage() {
                 >
                   <div className="text-base font-semibold mb-0.5 tracking-[0.1em]"
                     style={{ color: ready ? c.goldSolid : c.textMuted }}>
-                    {s.name}
+                    {t(`home.section.${s.key}.name` as DictKey)}
                   </div>
                   <div className="text-[9px] tracking-wider"
                     style={{ color: ready ? '#10b981' : c.textMuted }}>
-                    {ready ? '✓ 已上线' : `${s.when} 开放`}
+                    {t(`home.section.${s.key}.status` as DictKey)}
                   </div>
                 </a>
               );
@@ -1174,17 +1141,17 @@ export default function HomePage() {
 
         <div className="text-center">
           <p className="text-[10px] tracking-wider mb-3" style={{ color: c.footerText }}>
-            紫微命盘 · 基于倪海厦正宗体系 · 仅供参考，命运掌握在自己手中
+            {t('home.footer.disclaimer1')}
           </p>
           <p className="text-[10px] tracking-wider mb-3 max-w-2xl mx-auto leading-relaxed"
             style={{ color: c.footerText, opacity: 0.85 }}>
-            本平台基于中国传统文化研究，仅提供学习参考。<br className="sm:hidden" />
-            不构成任何医疗、投资、法律或重大决策建议。
+            {t('home.footer.disclaimer2')}<br className="sm:hidden" />
+            {t('home.footer.disclaimer3')}
           </p>
           <p className="text-[10px] tracking-wider" style={{ color: c.footerText }}>
-            <a href="/terms" style={{ color: c.footerText, textDecoration: 'underline' }}>服务条款</a>
+            <a href="/terms" style={{ color: c.footerText, textDecoration: 'underline' }}>{t('home.footer.terms')}</a>
             {' · '}
-            <a href="/privacy" style={{ color: c.footerText, textDecoration: 'underline' }}>隐私政策</a>
+            <a href="/privacy" style={{ color: c.footerText, textDecoration: 'underline' }}>{t('home.footer.privacy')}</a>
           </p>
         </div>
       </footer>
