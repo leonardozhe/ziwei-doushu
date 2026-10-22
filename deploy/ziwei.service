@@ -1,0 +1,27 @@
+# 紫微斗数应用 —— systemd 服务单元
+#
+#   sudo cp deploy/ziwei.service /etc/systemd/system/
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now ziwei
+#
+# 前置：Postgres 容器已起（deploy/docker-compose.db.yml）
+
+[Unit]
+Description=Ziwei Global (Next.js)
+After=docker.service network-online.target
+Requires=docker.service
+
+[Service]
+Type=simple
+User=ci
+WorkingDirectory=/home/ci/dev/ziwei-global/app
+Environment=NODE_ENV=production
+EnvironmentFile=/home/ci/dev/ziwei-global/app/.env.local
+ExecStart=/usr/bin/npx next start -p 3020
+Restart=always
+RestartSec=5
+StandardOutput=append:/home/ci/dev/ziwei-global/logs/ziwei.service.log
+StandardError=append:/home/ci/dev/ziwei-global/logs/ziwei.service.log
+
+[Install]
+WantedBy=multi-user.target
