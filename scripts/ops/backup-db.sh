@@ -122,6 +122,8 @@ ziwei_backup_age_days() {
   printf '%s' "$(( ( now - epoch ) / 86400 ))"
 }
 
+# 由 EXIT trap 调用
+# shellcheck disable=SC2329
 cleanup_partial() {
   local code=$?
   if (( code != 0 )); then
@@ -164,17 +166,19 @@ for t in "${ALL_TABLES[@]}"; do
   if (( ${#TABLES[@]} > 0 )); then
     keep=0
     for pat in "${TABLES[@]}"; do
-      # shellcheck disable=SC2254
+      # $pat 不加引号 = 启用 glob 匹配（--table 支持 public.ziwei_*）
+      # shellcheck disable=SC2053
       [[ "$t" == $pat ]] && { keep=1; break; }
     done
   fi
   if (( keep == 1 )); then
     for pat in "${EXCLUDE_TABLES[@]+"${EXCLUDE_TABLES[@]}"}"; do
-      # shellcheck disable=SC2254
+      # $pat 不加引号 = 启用 glob 匹配
+      # shellcheck disable=SC2053
       [[ "$t" == $pat ]] && { keep=0; break; }
     done
   fi
-  (( keep == 1 )) && SELECTED+=("$t")
+  if (( keep == 1 )); then SELECTED+=("$t"); fi
 done
 (( ${#SELECTED[@]} > 0 )) || ziwei_die "过滤后没有任何表可备份" "$ZIWEI_EX_USAGE"
 ziwei_log "将备份 ${#SELECTED[@]} 张表（共 ${#ALL_TABLES[@]} 张）"
@@ -239,9 +243,9 @@ ziwei_step "4/6 生成 manifest 与校验和"
 (
   cd "$BACKUP_DIR"
   if command -v sha256sum >/dev/null 2>&1; then
-    sha256sum ziwei.dump *.sql.gz > SHA256SUMS 2>/dev/null || true
+    sha256sum ziwei.dump ./*.sql.gz > SHA256SUMS 2>/dev/null || true
   else
-    shasum -a 256 ziwei.dump *.sql.gz > SHA256SUMS 2>/dev/null || true
+    shasum -a 256 ziwei.dump ./*.sql.gz > SHA256SUMS 2>/dev/null || true
   fi
 )
 [[ -s "$BACKUP_DIR/SHA256SUMS" ]] || ziwei_die "生成 SHA256SUMS 失败" "$ZIWEI_EX_BACKUP"
@@ -377,7 +381,6 @@ ziwei_step "6/6 保留策略（保留 $KEEP_DAYS 天）"
 pruned=0
 if (( DO_PRUNE == 1 )); then
   NOW_EPOCH="$(date +%s)"
-  KEEP_SECONDS=$(( KEEP_DAYS * 86400 ))
   while IFS= read -r old; do
     [[ -n "$old" ]] || continue
     [[ "$old" == "$BACKUP_DIR" ]] && continue

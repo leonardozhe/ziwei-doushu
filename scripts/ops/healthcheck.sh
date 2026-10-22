@@ -38,6 +38,7 @@ source "$SCRIPT_DIR/common.sh"
 # 日志统一走 stderr，stdout 只保留表格（--json 时表格也走 stderr，stdout 留给纯 JSON）
 ziwei_log()  { printf '[%s] %s\n' "$(ziwei_ts)" "$*" >&2; }
 ziwei_step() { printf '\n[%s] === %s ===\n' "$(ziwei_ts)" "$*" >&2; }
+# shellcheck disable=SC2329
 ziwei_warn() { printf '[%s] WARN  %s\n' "$(ziwei_ts)" "$*" >&2; }
 ziwei_err()  { printf '[%s] ERROR %s\n' "$(ziwei_ts)" "$*" >&2; }
 

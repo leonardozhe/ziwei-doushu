@@ -7,6 +7,8 @@
 # shellcheck shell=bash
 
 # ── 退出码 ───────────────────────────────────────────────
+# 这些常量在 source 它的脚本里使用，单独 lint 本文件时会报 unused
+# shellcheck disable=SC2034
 ZIWEI_EX_OK=0        # 成功
 ZIWEI_EX_USAGE=2     # 参数用法错误
 ZIWEI_EX_DEPEND=3    # 缺少依赖命令
@@ -175,7 +177,7 @@ ziwei_set_locale
 ziwei_dwidth() {
   local s="${1:-}" i c cp w=0
   local modern=0
-  (( ${BASH_VERSINFO[0]:-3} >= 4 )) && modern=1
+  if (( ${BASH_VERSINFO[0]:-3} >= 4 )); then modern=1; fi
   for (( i = 0; i < ${#s}; i++ )); do
     c="${s:i:1}"
     printf -v cp '%d' "'$c" 2>/dev/null || cp=63

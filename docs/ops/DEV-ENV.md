@@ -204,7 +204,240 @@ git pull origin main
 
 ---
 
-## 8. 注意事项
+## 8. 备份与恢复
+
+三个脚本都在 `scripts/ops/` 下，都遵循 `set -euo pipefail`，失败时返回明确的非零退出码。
+
+| 脚本 | 作用 |
+|---|---|
+| `backup-db.sh` | 备份：pg_dump 自定义格式 + 结构/数据分离 + manifest + 校验和 + 保留策略 |
+| `restore-db.sh` | 恢复：支持只校验、只恢复结构、只恢复数据、整体恢复 |
+| `healthcheck.sh` | 一条命令输出整体健康状态，任何一项不达标就非 0 退出 |
+
+### 8.1 备份产物长什么样
+
+每次备份是一个独立目录，`<备份目录>/ziwei-<时间戳>-<标签>/`：
+
+```
+ziwei-20261022-150000-ci199/
+├── ziwei.dump        # pg_dump 自定义格式 —— 首选恢复方式（结构+数据一体，支持并行恢复）
+├── schema.sql.gz     # 只有结构（表 / 索引 / 扩展 / 约束）
+├── data.sql.gz       # 只有数据（COPY 格式）
+├── manifest.json     # 机器可读：备份时间、源库大小、各表行数、年份覆盖、各文件 sha256
+├── manifest.txt      # 人读版清单
+└── SHA256SUMS        # 各文件 sha256，可直接 sha256sum -c
+```
+
+**默认备份目录**：`/home/ci/dev/ziwei-global/backups`
+**默认保留天数**：14（`ZIWEI_BACKUP_KEEP_DAYS`）
+**默认连接串**：`postgresql://ziwei:ziwei_dev_pwd@127.0.0.1:5435/ziwei`（`ZIWEI_DATABASE_URL`）
+
+### 8.2 怎么备份
+
+```bash
+ssh ci199
+cd ~/dev/ziwei-global/app
+
+# 常规全量备份
+bash scripts/ops/backup-db.sh
+
+# 备份并做恢复校验（会临时建一个库 restore 进去比对行数，慢但能证明备份真的可用）
+bash scripts/ops/backup-db.sh --verify
+
+# 指定目录和保留天数
+bash scripts/ops/backup-db.sh --dir /home/ci/dev/ziwei-global/backups --keep-days 30
+
+# 只备份部分表（支持 glob，用于快速演练）
+bash scripts/ops/backup-db.sh --table public.ziwei_charts --verify
+
+# 排除某张表
+bash scripts/ops/backup-db.sh --exclude-table public.probe_tsv
+```
+
+常用参数：
+
+| 参数 | 说明 |
+|---|---|
+| `--dir <path>` | 备份输出目录 |
+| `--label <name>` | 备份名后缀，默认取主机名 |
+| `--verify` | 备份后恢复到临时库并逐表比对行数 |
+| `--no-verify` | 跳过校验（默认行为） |
+| `--skip-data` / `--skip-schema` | 不导出 data.sql / schema.sql |
+| `--table <glob>` / `--exclude-table <glob>` | 表白名单 / 黑名单 |
+| `--keep-days <n>` | 保留天数 |
+| `--no-prune` | 不清理过期备份 |
+| `--keep-verify-db` | 校验后保留临时库（调试用） |
+
+保留策略按**备份名里的时间戳**判断年龄（不是文件 mtime），所以手动改过 mtime 也不会误删。
+
+退出码：`0` 成功 / `2` 参数错误 / `3` 缺依赖 / `4` 连不上库 / `5` 备份失败 / `6` 校验失败。
+
+### 8.3 怎么恢复
+
+```bash
+ssh ci199
+cd ~/dev/ziwei-global/app
+
+# ① 先只校验，不动数据
+bash scripts/ops/restore-db.sh --from /home/ci/dev/ziwei-global/backups/ziwei-20261022-150000-ci199 --verify-only
+
+# ② 恢复到另一个库（演练用，不影响生产库）
+bash scripts/ops/restore-db.sh   --from /home/ci/dev/ziwei-global/backups/ziwei-20261022-150000-ci199   --to ziwei_restore_test --yes
+
+# ③ 覆盖式恢复生产库（危险！会 DROP 目标库再重建）
+bash scripts/ops/restore-db.sh   --from /home/ci/dev/ziwei-global/backups/ziwei-20261022-150000-ci199   --yes
+
+# ④ 只恢复结构
+bash scripts/ops/restore-db.sh --from <目录> --schema-only --prefer-sql --yes
+
+# ⑤ 只恢复数据
+bash scripts/ops/restore-db.sh --from <目录> --data-only --prefer-sql --yes
+
+# ⑥ 跳过索引恢复（快得多，索引事后单独建）
+bash scripts/ops/restore-db.sh --from <目录> --to ziwei_rehearsal --yes --skip-index
+```
+
+要点：
+
+- **`--from` 接受三种形式**：备份目录 / `ziwei.dump` 单文件 / `schema.sql.gz`+`data.sql.gz`。
+- **恢复模式自动选择**：目录里有 `ziwei.dump` 时默认走 `pg_restore`（结构+数据一体，dump 自带建表语句）；
+  显式加 `--prefer-sql` 才走 `schema.sql` + `data.sql` 路径。两者不会同时跑——
+  dump 已经建好表，再灌 `schema.sql` 会撞 `relation already exists`。
+- **恢复前自动检查目标库**：存在就先 `DROP DATABASE`（会先踢掉占用连接）再 `CREATE`；
+  不存在就新建。`--no-drop` 可以保留目标库，但要求它是空的。
+- **恢复后自动核对行数**：拿 `manifest.json` 里的 `row_counts` 逐表比对，不一致就以退出码 6 失败。
+- **`--skip-index`**：跳过索引/触发器/外键约束，只灌数据。恢复快数倍，
+  代价是索引要事后重建（脚本结束时会打印重建命令）。
+- **扩展自动准备**：`pg_dump --table=...` 不会带出 `CREATE EXTENSION`，
+  但会带出依赖扩展的索引。脚本在恢复前自动建好 `pg_trgm`，
+  否则目标库会因为缺 `gin_trgm_ops` 而恢复失败。
+- 不加 `--yes` 会有交互确认。
+
+退出码：`0` 成功 / `2` 参数错误 / `3` 缺依赖 / `4` 连不上库 / `6` 校验失败 / `7` 恢复失败。
+
+### 8.4 恢复演练步骤
+
+每次改数据管线（重建索引、换装载逻辑、升级 Postgres）之前跑一遍：
+
+```bash
+# 1. 备份（带校验，顺带证明备份可用）
+bash scripts/ops/backup-db.sh --verify
+
+# 2. 恢复到一个临时库
+bash scripts/ops/restore-db.sh --from <上一步的备份目录> --to ziwei_rehearsal --yes
+
+# 3. 核对行数（restore 脚本已经自动做，这里再独立查一遍）
+export PGPASSWORD=ziwei_dev_pwd
+psql -h 127.0.0.1 -p 5435 -U ziwei -d ziwei_rehearsal   -c "SELECT count(*) FROM ziwei_charts"   -c "SELECT count(*) FROM ziwei_readings"   -c "SELECT count(*) FROM ziwei_sections"
+
+# 4. 起一个指向临时库的应用实例做功能抽查
+#    （把 DATABASE_URL 的库名换成 ziwei_rehearsal，端口避开 3020）
+
+# 5. 清理
+psql -h 127.0.0.1 -p 5435 -U ziwei -d postgres -c "DROP DATABASE ziwei_rehearsal;"
+```
+
+演练通过的标准：行数三项与生产库一致 + `/api/health` 返回 `status: ok`。
+
+### 8.5 恢复要多久
+
+**下面是 2026-10-22 在 199 服务器上的实测数据**（Postgres 16.15，容器 2GB shared_buffers /
+8GB effective_cache，数据卷在本地 NVMe）。测的是 `ziwei_readings`（877 万行 / 57 GB 原始）整表。
+
+#### 实测基线
+
+| 操作 | 数据量 | 耗时 |
+|---|---|---|
+| `pg_dump`（`--compress=6`，单表） | 57 GB → 14.4 GB 压缩 | **20 分 45 秒** |
+| `pg_restore --jobs=4`（含索引） | 14.4 GB → 41 GB 落库 | 数据 19 分钟 + trgm 索引 **约 2 小时** |
+| `pg_restore --jobs=4 --skip-index` | 同上，只灌数据 | **19 分钟**（877 万行全部到位） |
+| `pg_dump` + 恢复 + 校验（小表 `ziwei_charts` 67.5 万行） | 123 MB | **< 6 秒** |
+| `pg_dump` + 恢复 + 校验（小表 `ziwei_ingest_log` 78 行） | 64 kB | **< 3 秒** |
+| 恢复后 `count(*)` 核对 | 877 万行 | **约 1 秒**（走索引） |
+
+#### 结论
+
+| 场景 | 预估耗时 |
+|---|---|
+| **全量恢复（含全部索引）** | **3 – 4 小时** ← 瓶颈是 trgm 索引，不是数据 |
+| **全量恢复（`--skip-index`）+ 事后建索引** | 数据 45–60 分钟 + 索引 2–3 小时 |
+| 只恢复结构 | **< 1 分钟** |
+| 只恢复数据（`data.sql`） | 60–90 分钟 |
+| 恢复 + 行数核对 | 数据部分 + 约 2 分钟 |
+
+**关键结论：恢复慢的不是数据，是索引。**
+`ziwei_readings` 的 GIN trgm 索引要在 877 万条中文长文本上建，
+实测单独就要 **2 小时以上**（877 万行 × 平均 2.3KB 中文）。
+`ziwei_sections`（8269 万行）的 trgm 索引按 DEV-ENV 第 3.3 节记录约 30 分钟。
+所以全量恢复的现实答案是 **3–4 小时**，不是「几十分钟」。
+
+#### 恢复演练建议
+
+演练时**不要**追求「完整恢复并建好索引」，那样一次要 3–4 小时，占用生产库 IO。
+务实做法：
+
+```bash
+# 1. 备份（小范围即可，验证管线）
+bash scripts/ops/backup-db.sh --table public.ziwei_charts --verify
+
+# 2. 恢复到临时库，跳过索引（分钟级）
+bash scripts/ops/restore-db.sh --from <备份目录> --to ziwei_rehearsal --yes --skip-index
+
+# 3. 核对行数（restore 脚本已自动做，这里独立再查一遍）
+psql -h 127.0.0.1 -p 5435 -U ziwei -d ziwei_rehearsal -c "SELECT count(*) FROM ziwei_charts"
+
+# 4. 需要验证检索功能时，再单独建索引（这才是耗时的部分）
+psql -h 127.0.0.1 -p 5435 -U ziwei -d ziwei_rehearsal -f scripts/ingest/index-sections.sql
+
+# 5. 清理
+psql -h 127.0.0.1 -p 5435 -U ziwei -d postgres -c "DROP DATABASE ziwei_rehearsal;"
+```
+
+> 注意：上面的耗时假设磁盘和 IO 没被其它任务占满。
+> 若同时在跑 `CREATE INDEX` 或 `pg_dump`，实际耗时会明显变长
+> —— 本次基线就是在「另一个 agent 同时在给小节表建 trgm 索引」的情况下测的，属于偏悲观值。
+
+### 8.6 建议的备份策略
+
+| 项 | 建议 |
+|---|---|
+| 频率 | 每次数据管线变更后立即备份；平时每周一次 |
+| 保留 | 14 天（`ZIWEI_BACKUP_KEEP_DAYS`），每月 1 号那次保留 90 天 |
+| 异地 | `/home/ci/dev/ziwei-global/backups` 在同一块盘上，**不算真正的备份**。至少每周把备份目录 rsync 到另一台机器或对象存储 |
+| 校验 | 每次备份加 `--verify`，证明的不只是文件在，而是真的能恢复 |
+| 定时 | 用 systemd timer 或 cron 跑 `backup-db.sh --verify`，结果写日志；连续失败要告警 |
+
+### 8.7 健康检查
+
+```bash
+cd ~/dev/ziwei-global/app
+bash scripts/ops/healthcheck.sh
+```
+
+输出对齐表格，检查项：
+
+| 检查项 | 默认期望 |
+|---|---|
+| Postgres 容器 | `ziwei-postgres` 处于 running |
+| 数据库连接 | 能 SELECT 1 |
+| `/api/health` | HTTP 200 且 `status: ok` |
+| 命盘数 `ziwei_charts` | 674976 |
+| 解读段数 `ziwei_readings` | 8774688 |
+| 小节数 `ziwei_sections` | 参考值（不参与判定） |
+| 覆盖年份 | 1950–2026，77 年 |
+| 磁盘剩余 | ≥ 20 GB（`--min-free-gb` 可调） |
+
+任何一项不达标 → 退出码 **8**。`--json` 输出机器可读汇总（stdout 纯 JSON，日志走 stderr）。
+
+适合挂在监控里：
+
+```bash
+bash scripts/ops/healthcheck.sh --json 2>/dev/null | jq -e '.status == "ok"' >/dev/null || echo "紫微算命服务异常"
+```
+
+---
+
+## 9. 注意事项
 
 - **数据集口径**：解读是「本命盘视图」，不含按当前年龄改写的句子、倪师法则附加段与 AI 解读；
   按时辰序号直接排盘，**未做出生地真太阳时校正**。

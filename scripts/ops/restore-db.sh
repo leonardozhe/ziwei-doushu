@@ -87,6 +87,9 @@ DUMP_FILE=''
 SCHEMA_FILE=''
 DATA_FILE=''
 MANIFEST=''
+TOC_LIST=''
+SKIPPED_IDX=0
+SKIPPED_FK=0''
 
 if [[ -d "$FROM" ]]; then
   [[ -f "$FROM/ziwei.dump" ]] && DUMP_FILE="$FROM/ziwei.dump"
@@ -247,11 +250,18 @@ if (( USE_DUMP == 1 )); then
       rm -f "$TOC_LIST" "$TOC_LIST.raw"
       ziwei_die "生成 TOC 清单失败" "$ZIWEI_EX_RESTORE"
     fi
-    skipped_n="$(grep -cE ' (INDEX|TRIGGER) ' "$TOC_LIST.raw" || true)"
-    grep -vE ' (INDEX|TRIGGER) ' "$TOC_LIST.raw" > "$TOC_LIST" || true
+    SKIPPED_IDX="$(grep -cE ' (INDEX|TRIGGER) ' "$TOC_LIST.raw" || true)"
+    SKIPPED_FK="$(grep -cE ' FK CONSTRAINT ' "$TOC_LIST.raw" || true)"
+    skipped_idx="$SKIPPED_IDX"
+    skipped_fk="$SKIPPED_FK"
+    # 索引 + 触发器 + 外键约束一起延后：
+    #   索引 —— trgm 索引在 877 万行中文长文本上极慢，是恢复瓶颈；
+    #   外键 —— 分表恢复时父表可能不在同一个 dump 里，ADD CONSTRAINT 会直接失败。
+    grep -vE ' (INDEX|TRIGGER) | FK CONSTRAINT ' "$TOC_LIST.raw" > "$TOC_LIST" || true
     rm -f "$TOC_LIST.raw"
     [[ -s "$TOC_LIST" ]] || { rm -f "$TOC_LIST"; ziwei_die "过滤后的 TOC 清单为空" "$ZIWEI_EX_RESTORE"; }
-    ziwei_warn "按 --skip-index 跳过 $skipped_n 个索引/触发器；数据灌完后需自行重建"
+    ziwei_warn "按 --skip-index 跳过 $skipped_idx 个索引/触发器、$skipped_fk 个外键约束"
+    ziwei_warn "数据灌完后需自行重建索引与外键（见 docs/ops/DEV-ENV.md 第 8 节）"
     RESTORE_TOC_ARGS=(--use-list "$TOC_LIST")
   fi
 
@@ -259,10 +269,10 @@ if (( USE_DUMP == 1 )); then
   if ! pg_restore -h "$PGHOST" -p "$PGPORT" -U "$PGUSER" -d "$TARGET_DB" \
         --no-owner --no-privileges --exit-on-error --jobs="$JOBS" \
         "${RESTORE_TOC_ARGS[@]+"${RESTORE_TOC_ARGS[@]}"}" "$DUMP_FILE"; then
-    rm -f "$TOC_LIST" 2>/dev/null || true
+    if [[ -n "$TOC_LIST" ]]; then rm -f "$TOC_LIST"; fi
     ziwei_die "pg_restore 失败" "$ZIWEI_EX_RESTORE"
   fi
-  rm -f "$TOC_LIST" 2>/dev/null || true
+  if [[ -n "$TOC_LIST" ]]; then rm -f "$TOC_LIST"; fi
 fi
 
 if (( USE_SQL == 1 )); then
@@ -285,6 +295,11 @@ fi
 
 restore_end=$(date +%s)
 ziwei_log "恢复完成，用时 $(( restore_end - restore_start ))s"
+if (( SKIP_INDEX == 1 )); then
+  ziwei_warn "本次跳过了 $SKIPPED_IDX 个索引/触发器与 $SKIPPED_FK 个外键约束"
+  ziwei_warn "重建参考：psql \"\$DATABASE_URL\" -f scripts/ingest/index-sections.sql"
+  ziwei_warn "          psql \"\$DATABASE_URL\" -f scripts/ingest/schema.sql"
+fi
 
 # ── 结果核对 ─────────────────────────────────────────────
 ziwei_step "恢复后行数核对"
