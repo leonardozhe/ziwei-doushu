@@ -132,13 +132,23 @@ export async function countTermCharts(
   // 注意：不要用 count(DISTINCT tc.chart_key) ——
   //   (term_id, chart_key) 本来就是主键，天然唯一；
   //   DISTINCT 让 Postgres 去重，实测 3546ms vs 38ms（慢 100 倍）。
-  // 同理：不 join 命盘表（1773ms → 26ms）
+  // 无过滤条件时直接读预存的 chart_count（1.2ms），
+  // 实时 count 要扫 67 万行（2000ms+）。
+  if (where.length === 0) {
+    const rows = await query<{ chart_count: number }>(
+      `SELECT chart_count FROM ziwei_terms WHERE term = $1`,
+      [term],
+    );
+    return Number(rows[0]?.chart_count ?? 0);
+  }
+
+  // 有过滤条件才实时 count（不 join 命盘表：1773ms → 26ms）
   const rows = await query<{ n: string }>(
     `SELECT count(*) AS n
        FROM ziwei_term_charts tc
        JOIN ziwei_terms t ON t.id = tc.term_id
       WHERE t.term = $1
-        ${where.length ? 'AND ' + where.join(' AND ') : ''}`,
+        ${where.join(' AND ')}`,
     params,
   );
   return Number(rows[0]?.n ?? 0);
