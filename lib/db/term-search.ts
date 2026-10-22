@@ -48,27 +48,31 @@ export async function searchTerms(
   const offset = Math.max(opts.offset ?? 0, 0);
 
   const params: unknown[] = [term];
-  const where: string[] = [];
 
+  // 年份条件作用在倒排表冗余的 birth_year 上（可直接走复合索引）
+  const innerWhere: string[] = [];
   if (opts.year !== undefined) {
     params.push(opts.year);
-    where.push(`c.birth_year = $${params.length}`);
+    innerWhere.push(`birth_year = $${params.length}`);
   }
   if (opts.yearFrom !== undefined) {
     params.push(opts.yearFrom);
-    where.push(`c.birth_year >= $${params.length}`);
+    innerWhere.push(`birth_year >= $${params.length}`);
   }
   if (opts.yearTo !== undefined) {
     params.push(opts.yearTo);
-    where.push(`c.birth_year <= $${params.length}`);
+    innerWhere.push(`birth_year <= $${params.length}`);
   }
+
+  // 性别 / 命宫主星只存在于命盘表，作用在外层
+  const outerWhere: string[] = [];
   if (opts.gender) {
     params.push(opts.gender);
-    where.push(`c.gender = $${params.length}`);
+    outerWhere.push(`c.gender = $${params.length}`);
   }
   if (opts.mingzhu) {
     params.push(opts.mingzhu);
-    where.push(`c.mingzhu = $${params.length}`);
+    outerWhere.push(`c.mingzhu = $${params.length}`);
   }
 
   params.push(limit, offset);
@@ -86,12 +90,13 @@ export async function searchTerms(
          SELECT term_id, chart_key, hits
            FROM ziwei_term_charts
           WHERE term_id = (SELECT id FROM ziwei_terms WHERE term = $1)
-            ${where.length ? 'AND ' + where.join(' AND ') : ''}
+            ${innerWhere.length ? 'AND ' + innerWhere.join(' AND ') : ''}
           ORDER BY hits DESC, birth_year DESC
           LIMIT $${limitIdx} OFFSET $${offsetIdx}
        ) tc
        JOIN ziwei_terms t ON t.id = tc.term_id
-       JOIN ziwei_charts c ON c.chart_key = tc.chart_key`,
+       JOIN ziwei_charts c ON c.chart_key = tc.chart_key
+       ${outerWhere.length ? 'WHERE ' + outerWhere.join(' AND ') : ''}`,
     params,
   );
 }
@@ -106,15 +111,15 @@ export async function countTermCharts(
 
   if (opts.year !== undefined) {
     params.push(opts.year);
-    where.push(`c.birth_year = $${params.length}`);
+    where.push(`tc.birth_year = $${params.length}`);
   }
   if (opts.yearFrom !== undefined) {
     params.push(opts.yearFrom);
-    where.push(`c.birth_year >= $${params.length}`);
+    where.push(`tc.birth_year >= $${params.length}`);
   }
   if (opts.yearTo !== undefined) {
     params.push(opts.yearTo);
-    where.push(`c.birth_year <= $${params.length}`);
+    where.push(`tc.birth_year <= $${params.length}`);
   }
   if (opts.gender) {
     params.push(opts.gender);
