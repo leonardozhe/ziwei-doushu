@@ -55,6 +55,26 @@ export async function GET(request: Request) {
     yearTo: intParam('yearTo'),
   };
 
+  // 无任何过滤条件时，候选集是全部 67.5 万张盘，ILIKE 退化成全表扫描
+  // （实测单次 >2 分钟）。这里给一个明确的报错，让调用方加过滤条件，
+  // 而不是让请求挂到超时。
+  const hasNarrowing =
+    filters.year !== undefined ||
+    filters.yearFrom !== undefined ||
+    filters.yearTo !== undefined ||
+    filters.gender !== undefined ||
+    filters.mingzhu !== undefined ||
+    filters.topic !== undefined;
+
+  if (!hasNarrowing) {
+    return apiError(
+      '全库检索会扫描 877 万段解读，请至少加一个过滤条件：' +
+      'year / yearFrom / yearTo / gender / topic / mingzhu',
+      400,
+      { hint: '例如 /api/search?q=天府&year=1990' },
+    );
+  }
+
   try {
     const hits = await searchReadings(q, { ...filters, limit, offset });
     const total = await countMatchingCharts(q, filters);
