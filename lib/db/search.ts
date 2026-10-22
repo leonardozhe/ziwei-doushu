@@ -107,6 +107,10 @@ export async function searchReadings(
   const limitIdx = params.length - 1;
   const offsetIdx = params.length;
 
+  // 裸关键词（无通配符），用于 snippet 里定位命中位置
+  params.push(keyword);
+  const rawKeywordIdx = params.length;
+
   // 先按盘过滤（走 ziwei_charts 索引）缩小候选集，再在候选盘内做 ILIKE
   return query<SearchHit>(
     `WITH cand AS (
@@ -133,7 +137,10 @@ export async function searchReadings(
             c.gender, c.mingzhu,
             h.hits,
             h.matching_topics,
-            (SELECT substring(r2.content from greatest(1, position($1 in r2.content) - 40) for 220)
+            -- snippet 定位到关键词命中处：ILIKE 模式去掉通配符后取位置
+            (SELECT substring(r2.content
+                               from greatest(1, position($${rawKeywordIdx} in r2.content) - 40)
+                               for 220)
                FROM ziwei_readings r2
               WHERE r2.id = h.first_id) AS snippet
        FROM hit h
