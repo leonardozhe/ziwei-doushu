@@ -1,8 +1,13 @@
 /**
  * 引擎口径 ↔ 解读数据集口径 一致性回归。
  *
- * 这是数据可信度的核心：数据集的 `ms`（命宫第一颗主星）必须和
- * 引擎 `generateChart()` 算出来的命宫主星一致，否则「按盘取解读」就会取错。
+ * 这是数据可信度的核心：数据集的 `ms`（**命宫里的第一颗主星**）必须和
+ * 引擎 `generateChart()` 排出来的命宫主星一致，否则「按盘取解读」就会取错。
+ *
+ * 注意区分两个概念：
+ *   - `chart.mingZhu` 是**命主星**（按命宫地支查表，倪师体系里论终身）
+ *   - 数据集的 `ms` 是**命宫宫位里的第一颗主星**（论性格格局）
+ * 两者不是一回事，断言必须用后者。
  *
  * 抽样规则：按年份均匀取样，每年取若干张盘，覆盖全部时辰与两种性别。
  */
@@ -58,7 +63,13 @@ async function main() {
     if (!birth) continue;
 
     const chart = generateChart(birth);
-    const engineMingZhu = chart.mingZhu || null;
+
+    // 命宫宫位里的第一颗主星（type === 'major'）
+    const mingPalace = chart.palaces.find((p) => p.isMingGong);
+    assert.ok(mingPalace, `${s.chart_key}: 找不到命宫`);
+    const firstMajor = mingPalace!.stars.find((st) => st.type === 'major');
+    const engineMingZhu = firstMajor?.name ?? null;
+
     const dataMingZhu = s.mingzhu && s.mingzhu.trim() !== '' ? s.mingzhu : null;
 
     if (dataMingZhu === null) {
