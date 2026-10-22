@@ -17,24 +17,24 @@ export async function GET() {
   }
 
   try {
-    const [counts] = await pool.query<{ charts: string; readings: string }>(
+    const counts = await pool.query<{ charts: string; readings: string }>(
       `SELECT (SELECT count(*) FROM ziwei_charts)  AS charts,
               (SELECT count(*) FROM ziwei_readings) AS readings`,
     );
-    const [years] = await pool.query<{ min_year: number; max_year: number; years: number }>(
+    const years = await pool.query<{ min_year: number; max_year: number; years: number }>(
       `SELECT min(birth_year) AS min_year, max(birth_year) AS max_year,
               count(DISTINCT birth_year) AS years
          FROM ziwei_charts`,
     );
-    const [version] = await pool.query<{ content_version: string }>(
+    const version = await pool.query<{ content_version: string }>(
       `SELECT content_version FROM ziwei_charts LIMIT 1`,
     );
 
     return apiOk({
       status: 'ok',
       database: 'connected',
-      charts: Number(counts.charts),
-      readings: Number(counts.readings),
+      charts: Number(counts.rows[0]?.charts ?? 0),
+      readings: Number(counts.rows[0]?.readings ?? 0),
       yearRange: years.rows[0]
         ? { from: years.rows[0].min_year, to: years.rows[0].max_year, count: Number(years.rows[0].years) }
         : null,
