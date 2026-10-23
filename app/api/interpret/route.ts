@@ -127,8 +127,14 @@ export async function POST(request: Request) {
       };
 
       try {
-        for await (const text of streamChat(config, messages)) {
-          send({ delta: { text } });
+        for await (const chunk of streamChat(config, messages)) {
+          // 推理过程单独发 thinking 事件：前端用来显示「正在推演」，
+          // 不混进正式答案。正文仍然走 delta.text（前端既有协议）。
+          if (chunk.type === 'reasoning') {
+            send({ thinking: chunk.text });
+          } else {
+            send({ delta: { text: chunk.text } });
+          }
         }
       } catch (err) {
         const message = err instanceof AiUpstreamError

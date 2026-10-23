@@ -91,8 +91,18 @@ export class AiUpstreamError extends Error {
   }
 }
 
+/** 流式增量：区分「推演过程」与「正文」 */
+export interface ChatDelta {
+  type: 'reasoning' | 'content';
+  text: string;
+}
+
 /**
- * 发起流式对话，逐个产出正文增量。
+ * 发起流式对话，逐个产出增量。
+ *
+ * 推理类模型（cc1/deepseek-v4.1-flash 等）会先流式输出 reasoning_content，
+ * 7–14 秒后才开始输出正文。把推理过程也透传出去，前端就能立刻给出反馈，
+ * 而不是让用户盯着空白等十几秒。
  *
  * 抛错时机：建立连接前抛 AiUpstreamError；
  * 流已开始后上游报错，则静默结束（已产出的内容仍有效）。
@@ -100,7 +110,7 @@ export class AiUpstreamError extends Error {
 export async function* streamChat(
   config: AiConfig,
   messages: ChatMessage[],
-): AsyncGenerator<string, void, unknown> {
+): AsyncGenerator<ChatDelta, void, unknown> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), config.timeoutMs ?? 60_000);
 
@@ -164,9 +174,11 @@ export async function* streamChat(
             choices?: { delta?: { content?: string; reasoning_content?: string } }[];
           }).choices?.[0]?.delta;
 
-          // 只要正文，丢掉推理过程
+          if (typeof delta?.reasoning_content === 'string' && delta.reasoning_content) {
+            yield { type: 'reasoning', text: delta.reasoning_content };
+          }
           if (typeof delta?.content === 'string' && delta.content) {
-            yield delta.content;
+            yield { type: 'content', text: delta.content };
           }
         }
       }
