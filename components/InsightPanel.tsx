@@ -194,6 +194,8 @@ export default function InsightPanel({ chart, selectedPalace, selectedSiHua }: I
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
+  // 推理过程（cc1/deepseek-v4.1-flash 等推理模型会先思考 7–14 秒）
+  const [thinking, setThinking] = useState('');
   const [activeTopic, setActiveTopic] = useState<string>('overview');
   const messagesRef = useRef<Message[]>([]); // always-current copy for closures
   const loadingRef = useRef(false);
@@ -290,7 +292,11 @@ ${selectedSiHua.starName}化${selectedSiHua.siHua}落在【${palaceName}】，�
         body: JSON.stringify({ chart, messages: apiMessages }),
       });
       if (res.status === 404) throw new Error('api-missing');
-      if (!res.ok) throw new Error('请求失败');
+      if (!res.ok) {
+        // 服务端会回明确的错误（如 AI 未配置 / 限流），优先展示它
+        const body = await res.json().catch(() => null) as { error?: string } | null;
+        throw new Error(body?.error || `请求失败（HTTP ${res.status}）`);
+      }
       if (!res.body) throw new Error('无响应流');
 
       const reader = res.body.getReader();
@@ -308,7 +314,13 @@ ${selectedSiHua.starName}化${selectedSiHua.siHua}落在【${palaceName}】，�
           const data = line.slice(6);
           if (data === '[DONE]') break;
           try {
-            const delta = JSON.parse(data).delta?.text ?? '';
+            const parsed = JSON.parse(data);
+            if (typeof parsed.thinking === 'string') {
+              setThinking(prev => (prev + parsed.thinking).slice(-400));
+              continue;
+            }
+            const delta = parsed.delta?.text ?? '';
+            if (delta) setThinking('');
             assistantText += delta;
             setMessages(prev => {
               const updated = [...prev];
@@ -320,7 +332,11 @@ ${selectedSiHua.starName}化${selectedSiHua.siHua}落在【${palaceName}】，�
       }
     } catch (e) {
       const missing = e instanceof Error && e.message === 'api-missing';
-      setMessages(prev => [...prev, { role: 'assistant', content: missing ? t('chart.insight.apiMissing') : t('chart.insight.failed') }]);
+      const detail = e instanceof Error && !missing ? e.message : '';
+      setMessages(prev => [...prev, {
+        role: 'assistant',
+        content: missing ? t('chart.insight.apiMissing') : `${t('chart.insight.failed')}${detail ? `：${detail}` : ''}`,
+      }]);
     } finally {
       setLoading(false);
       loadingRef.current = false;
@@ -331,6 +347,7 @@ ${selectedSiHua.starName}化${selectedSiHua.siHua}落在【${palaceName}】，�
     if (!text.trim() || loadingRef.current) return;
     loadingRef.current = true;
     setLoading(true);
+    setThinking('');
 
     const userMsg: Message = { role: 'user', content: text, hidden };
     // Capture current messages synchronously via ref (avoids stale closure)
@@ -433,7 +450,29 @@ ${selectedSiHua.starName}化${selectedSiHua.siHua}落在【${palaceName}】，�
                   <span style={{ color: 'var(--t-gold)', opacity: 0.4 }}>✦</span>
                   {t('chart.insight.title')}
                 </div>
-                <AiContent text={msg.content} streaming={loading && isLastMsg} />
+                {loading && isLastMsg && !msg.content ? (
+                  <div className="text-[11px] leading-6" style={{ color: 'var(--t-faint)' }}>
+                    <span className="animate-pulse">{t('chart.insight.loading')}</span>
+                    {thinking && (
+                      <div
+                        className="mt-2 rounded-lg px-2.5 py-2 text-[10px] leading-5"
+                        style={{
+                          background: 'rgba(212,168,67,0.05)',
+                          border: '1px dashed rgba(212,168,67,0.18)',
+                          color: 'var(--t-faint)',
+                          maxHeight: 96,
+                          overflowY: 'auto',
+                          whiteSpace: 'pre-wrap',
+                          opacity: 0.75,
+                        }}
+                      >
+                        {thinking.slice(-260)}
+                      </div>
+                    )}
+                  </div>
+                ) : (
+                  <AiContent text={msg.content} streaming={loading && isLastMsg} />
+                )}
               </motion.div>
             );
           })}
