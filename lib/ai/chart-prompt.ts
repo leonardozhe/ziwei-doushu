@@ -68,9 +68,9 @@ export function serializeChart(chart: ZiweiChart): string {
   const lunar = chart.lunarInfo;
   if (lunar) {
     const leap = lunar.isLeapMonth ? '闰' : '';
+    const pillars = lunar.fourPillars?.length ? `，四柱 ${lunar.fourPillars.join(' ')}` : '';
     lines.push(
-      `农历 ${lunar.lunarYear}年${leap}${Math.abs(lunar.lunarMonth)}月${lunar.lunarDay}日，` +
-      `四柱 ${lunar.fourPillars.join(' ')}`,
+      `农历 ${lunar.lunarYear}年${leap}${Math.abs(lunar.lunarMonth)}月${lunar.lunarDay}日${pillars}`,
     );
   }
 
