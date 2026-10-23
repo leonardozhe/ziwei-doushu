@@ -157,7 +157,9 @@ export function buildMessages(
   history: { role: 'user' | 'assistant'; content: string }[],
   opts: { maxGroundingChars?: number; maxHistoryTurns?: number } = {},
 ) {
-  const maxGrounding = opts.maxGroundingChars ?? 9000;
+  // 实测：grounding 越大，推理越长（9000 字 → 首正文约 12s；3000 字 → 约 9s）。
+  // 6000 字是质量与首字延迟的平衡点：足够放 2-3 个维度的核心论断。
+  const maxGrounding = opts.maxGroundingChars ?? 6000;
   const maxHistory = opts.maxHistoryTurns ?? 8;
 
   // ── 断语库片段（按预算截断，优先保留靠前的维度）──
